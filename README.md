@@ -1,0 +1,567 @@
+# Signalforge HTTP Extension
+
+A native PHP extension implementing high-performance PSR-7 HTTP Request and Response classes with zero-copy operations and direct superglobal access.
+
+## What's Different
+
+- **Native C implementation** - all HTTP operations run in native code
+- **Zero-copy string streams** - reference strings directly without data duplication
+- **Direct HashTable access** - bypass PHP arrays for superglobal data
+- **Lazy evaluation** - parse data only when accessed
+- **Immutable objects** - all `with*()` methods return new instances
+- **Memory efficient** - proper reference counting and cleanup
+- **PSR-7 compliant** - implements `ServerRequestInterface`, `ResponseInterface`, and `StreamInterface`
+- **Optimized for php-fpm** - designed for FastCGI environments
+- **No dependencies** - pure C extension with no external libraries
+
+## Why C?
+
+HTTP request/response handling is invoked on nearly every request, often hundreds of times. Moving HTTP operations to native code provides:
+
+- **Direct superglobal access** - bypass PHP's array layer for $_SERVER, $_GET, $_POST, $_COOKIE, $_FILES
+- **Zero-copy string operations** - reference string data directly without duplication
+- **Native hash tables** - efficient storage and lookup for headers and parameters
+- **Reduced overhead** - minimal PHP engine interaction during data access
+- **Memory efficiency** - proper reference counting and cleanup
+- **Lazy evaluation** - parse JSON/form data only when requested
+- **Immutable operations** - efficient object cloning with shared data structures
+
+## Features
+
+- **Full PSR-7 Compliance**: Implements `ServerRequestInterface`, `ResponseInterface`, and `StreamInterface`
+- **Zero Dependencies**: Pure C extension with no external libraries
+- **Hyper-Performance**: Direct HashTable access, zero-copy operations, lazy evaluation
+- **Immutable Objects**: All `with*()` methods return new instances
+- **Memory Efficient**: Proper reference counting and cleanup
+
+## Requirements
+
+- PHP 8.3+
+- Linux or macOS (tested on x86_64 and ARM64)
+- php-fpm recommended (works in CLI for testing)
+
+## Building
+
+### Docker (Recommended)
+
+No need to install PHP dev headers on your host:
+
+```bash
+cd http
+
+# Build Docker image with extension
+make docker-build
+
+# Run tests
+make docker-test
+
+# Run example
+make docker-example
+```
+
+### Host Installation
+
+```bash
+cd http
+phpize
+./configure --enable-signalforge_http
+make
+make test
+sudo make install
+```
+
+Then add `extension=signalforge_http.so` to your php.ini.
+
+See [INSTALL.md](INSTALL.md) for detailed instructions.
+
+## Usage
+
+### Request
+
+```php
+<?php
+
+use Signalforge\NativeHttp\Request;
+
+// Capture the current request
+$request = Request::capture();
+
+// HTTP Method & URI
+$method = $request->getMethod();                    // "POST"
+$target = $request->getRequestTarget();            // "/users/123?include=profile"
+$path = $request->getUri();                         // "/users/123?include=profile"
+
+// Headers (case-insensitive)
+$contentType = $request->getHeader('Content-Type'); // ['application/json']
+$contentTypeLine = $request->getHeaderLine('Content-Type'); // "application/json"
+$hasAuth = $request->hasHeader('Authorization');   // true/false
+$allHeaders = $request->getHeaders();              // ['content-type' => ['application/json']]
+
+// Parameters
+$queryParams = $request->getQueryParams();         // $_GET as array
+$parsedBody = $request->getParsedBody();           // JSON/form data (lazy parsed)
+
+// Body access
+$bodyStream = $request->getBody();                 // StreamInterface
+$rawBody = (string) $request->getBody();           // Raw body string
+
+// Server & environment
+$serverParams = $request->getServerParams();       // $_SERVER
+$userAgent = $serverParams['HTTP_USER_AGENT'];
+
+// Cookies
+$cookies = $request->getCookieParams();            // $_COOKIE as array
+$sessionId = $cookies['session_id'];
+
+// Uploaded files
+$files = $request->getUploadedFiles();             // Normalized file structure
+if (isset($files['avatar'])) {
+    $filename = $files['avatar']->getClientFilename();
+    $files['avatar']->moveTo('/uploads/' . $filename);
+}
+
+// Attributes (middleware data)
+$request = $request->withAttribute('user_id', 123);
+$userId = $request->getAttribute('user_id');       // 123
+$userId = $request->getAttribute('missing', 'default'); // 'default'
+
+// Immutable modifications
+$newRequest = $request
+    ->withMethod('PUT')
+    ->withHeader('X-API-Key', 'secret')
+    ->withQueryParams(['limit' => 10])
+    ->withParsedBody(['name' => 'John']);
+
+// Original request unchanged
+assert($request->getMethod() === 'POST');
+assert($newRequest->getMethod() === 'PUT');
+```
+
+### Response
+
+```php
+<?php
+
+use Signalforge\NativeHttp\Response;
+use Signalforge\NativeHttp\Stream;
+
+// Factory methods
+$response = Response::create(200, ['Content-Type' => 'application/json']);
+$response = Response::json(['users' => ['id' => 1, 'name' => 'John']], 200);
+$response = Response::text('Hello World', 200);
+$response = Response::html('<h1>Welcome</h1>', 200);
+$response = Response::redirect('/login', 302);
+
+// Status management
+$statusCode = $response->getStatusCode();          // 200
+$reasonPhrase = $response->getReasonPhrase();      // "OK"
+$response = $response->withStatus(404, 'Not Found');
+
+// Header management (case-insensitive)
+$response = $response->withHeader('Content-Type', 'application/json');
+$response = $response->withAddedHeader('Cache-Control', 'no-cache');
+$response = $response->withAddedHeader('Cache-Control', 'private');
+$hasHeader = $response->hasHeader('Content-Type'); // true
+$headerValue = $response->getHeader('Content-Type'); // ['application/json']
+$headerLine = $response->getHeaderLine('Content-Type'); // "application/json"
+$allHeaders = $response->getHeaders();
+
+// Body management
+$stream = Stream::fromString('{"message": "Hello"}');
+$response = $response->withBody($stream);
+$bodyStream = $response->getBody();
+
+// Output
+$response->send();                                  // Send headers + body
+$response->sendHeaders();                           // Send only headers
+$response->sendBody();                              // Send only body
+
+// Serialization
+$message = (string) $response;                      // Full HTTP message
+```
+
+### Stream
+
+```php
+<?php
+
+use Signalforge\NativeHttp\Stream;
+
+// Factory methods
+$stream = Stream::fromString('Hello World');        // TRUE zero-copy string reference
+$stream = Stream::fromResource(fopen('file.txt', 'r')); // From PHP resource
+$stream = Stream::fromFile('/path/to/file', 'r');  // From file path
+
+// Reading operations
+$data = $stream->read(5);                          // Read 5 bytes: "Hello"
+$remaining = $stream->getContents();               // Get rest: " World"
+$stream->rewind();                                 // Reset to beginning
+$all = (string) $stream;                           // Get entire contents
+
+// Writing operations
+$writableStream = Stream::fromString('');          // Empty writable stream
+$bytesWritten = $writableStream->write('Hello');   // Write data
+$writableStream->write(' World');                  // Append more
+
+// Seeking operations
+$stream->seek(6);                                  // Seek to position 6
+$position = $stream->tell();                       // Get current position: 6
+$stream->rewind();                                 // Reset to beginning
+
+// Stream capabilities
+$isReadable = $stream->isReadable();               // Check if can read
+$isWritable = $stream->isWritable();               // Check if can write
+$isSeekable = $stream->isSeekable();               // Check if supports seeking
+$atEnd = $stream->eof();                           // Check if at end
+
+// Metadata and size
+$size = $stream->getSize();                        // Size in bytes (or null)
+$metadata = $stream->getMetadata();                // All metadata
+$uri = $stream->getMetadata('uri');                // Specific metadata key
+
+// Resource management
+$underlying = $stream->detach();                   // Detach PHP resource
+$stream->close();                                  // Close stream and free resources
+```
+
+### UploadedFile
+
+```php
+<?php
+
+use Signalforge\NativeHttp\Request;
+
+// Get uploaded files from request
+$request = Request::capture();
+$files = $request->getUploadedFiles();
+
+// Single file upload
+if (isset($files['avatar'])) {
+    $file = $files['avatar'];
+
+    // File properties
+    $size = $file->getSize();                       // Size in bytes
+    $error = $file->getError();                     // UPLOAD_ERR_* constant
+    $clientName = $file->getClientFilename();       // Original filename
+    $mimeType = $file->getClientMediaType();        // MIME type
+
+    // Move file to permanent location
+    $targetPath = '/uploads/avatars/' . uniqid() . '_' . $clientName;
+    $file->moveTo($targetPath);
+
+    // Note: moveTo() can only be called once per UploadedFile
+}
+
+// Multiple file upload
+if (isset($files['photos'])) {
+    foreach ($files['photos'] as $photo) {
+        if ($photo->getError() === UPLOAD_ERR_OK) {
+            $filename = $photo->getClientFilename();
+            $photo->moveTo('/uploads/photos/' . $filename);
+        }
+    }
+}
+
+// Stream access (alternative to moveTo)
+$stream = $file->getStream();
+$content = $stream->getContents();
+```
+
+### Advanced Patterns
+
+```php
+<?php
+
+use Signalforge\NativeHttp\{Request, Response, Stream};
+
+// Middleware-style request processing
+function authenticate(Request $request): Request
+{
+    $token = $request->getHeaderLine('Authorization');
+    $userId = validateToken($token);
+
+    return $request->withAttribute('user_id', $userId);
+}
+
+function validateJson(Request $request): Request
+{
+    $contentType = $request->getHeaderLine('Content-Type');
+    if (!str_contains($contentType, 'application/json')) {
+        throw new InvalidArgumentException('JSON content type required');
+    }
+
+    return $request;
+}
+
+// Request processing pipeline
+$request = Request::capture();
+$request = authenticate($request);
+$request = validateJson($request);
+
+// JSON API response
+$data = ['users' => getUsers($request->getAttribute('user_id'))];
+$response = Response::json($data, 200);
+
+// CORS headers
+$response = $response
+    ->withHeader('Access-Control-Allow-Origin', '*')
+    ->withHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE')
+    ->withHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+// Conditional response
+if ($request->hasHeader('If-None-Match')) {
+    $etag = $request->getHeaderLine('If-None-Match');
+    if ($etag === generateEtag($data)) {
+        $response = $response->withStatus(304); // Not Modified
+    }
+}
+
+$response->send();
+```
+
+## API Reference
+
+### Request
+
+#### Factory Methods
+
+```php
+Request::capture(): ServerRequestInterface  // Capture current request from superglobals
+```
+
+#### PSR-7 MessageInterface Methods
+
+```php
+getProtocolVersion(): string                           // Get HTTP protocol version (always "1.1" in FastCGI)
+withProtocolVersion(string $version): static          // Return new instance with protocol version
+
+getHeaders(): array                                   // Get all headers as lowercase key => array values
+hasHeader(string $name): bool                         // Check if header exists (case-insensitive)
+getHeader(string $name): array                        // Get header values array
+getHeaderLine(string $name): string                    // Get header values as comma-separated string
+
+withHeader(string $name, string|array $value): static  // Replace header (case-insensitive)
+withAddedHeader(string $name, string|array $value): static // Add to existing header
+withoutHeader(string $name): static                   // Remove header
+
+getBody(): StreamInterface                            // Get message body stream
+withBody(StreamInterface $body): static               // Replace body stream
+```
+
+#### PSR-7 RequestInterface Methods
+
+```php
+getRequestTarget(): string                            // Get request target (path + query)
+withRequestTarget(string $target): static             // Set request target
+
+getMethod(): string                                   // Get HTTP method
+withMethod(string $method): static                    // Set HTTP method
+
+getUri(): string                                      // Get URI as string
+withUri(string|UriInterface $uri, bool $preserveHost = false): static // Set URI
+```
+
+#### PSR-7 ServerRequestInterface Methods
+
+```php
+getServerParams(): array                              // Get $_SERVER parameters
+getCookieParams(): array                              // Get $_COOKIE parameters
+withCookieParams(array $cookies): static              // Replace cookies
+getQueryParams(): array                               // Get $_GET parameters
+withQueryParams(array $query): static                 // Replace query parameters
+
+getUploadedFiles(): array                             // Get uploaded files structure
+withUploadedFiles(array $files): static               // Replace uploaded files
+
+getParsedBody(): array|object|null                    // Get parsed body (JSON/form data)
+withParsedBody(array|object|null $data): static       // Set parsed body
+
+getAttributes(): array                                // Get request attributes
+getAttribute(string $name, mixed $default = null)     // Get single attribute
+withAttribute(string $name, mixed $value): static     // Add/replace attribute
+withoutAttribute(string $name): static                // Remove attribute
+```
+
+### Response
+
+#### Factory Methods
+
+```php
+Response::create(int $status = 200, array $headers = [], mixed $body = null): static
+Response::json(mixed $data, int $status = 200): static
+Response::text(string $text, int $status = 200): static
+Response::html(string $html, int $status = 200): static
+Response::redirect(string $url, int $status = 302): static
+```
+
+#### PSR-7 MessageInterface Methods
+
+```php
+getProtocolVersion(): string                          // Get HTTP protocol version
+withProtocolVersion(string $version): static          // Set protocol version
+
+getHeaders(): array                                   // Get all headers
+hasHeader(string $name): bool                         // Check header exists
+getHeader(string $name): array                        // Get header values
+getHeaderLine(string $name): string                    // Get comma-separated header
+
+withHeader(string $name, string|array $value): static  // Replace header
+withAddedHeader(string $name, string|array $value): static // Add header value
+withoutHeader(string $name): static                   // Remove header
+
+getBody(): StreamInterface                            // Get body stream
+withBody(StreamInterface $body): static               // Replace body stream
+```
+
+#### PSR-7 ResponseInterface Methods
+
+```php
+getStatusCode(): int                                  // Get HTTP status code
+withStatus(int $code, string $reason = ''): static    // Set status code and reason
+getReasonPhrase(): string                             // Get reason phrase
+```
+
+#### Output Methods
+
+```php
+send(): void                                           // Send response (headers + body)
+sendHeaders(): void                                    // Send only headers
+sendBody(): void                                        // Send only body
+__toString(): string                                    // Serialize to HTTP message
+```
+
+### Stream
+
+#### Factory Methods
+
+```php
+Stream::fromString(string $string): static             // Create from string (zero-copy)
+Stream::fromResource(resource $resource): static       // Create from PHP stream resource
+Stream::fromFile(string $path, string $mode = 'r'): static // Create from file
+```
+
+#### PSR-7 StreamInterface Methods
+
+```php
+read(int $length): string                              // Read data from stream
+getContents(): string                                  // Get remaining contents
+write(string $string): int                             // Write data to stream
+
+seek(int $offset, int $whence = SEEK_SET): void        // Seek to position
+tell(): int                                            // Get current position
+rewind(): void                                         // Seek to beginning
+
+eof(): bool                                            // Check if at end of stream
+isReadable(): bool                                     // Check if stream is readable
+isWritable(): bool                                     // Check if stream is writable
+isSeekable(): bool                                     // Check if stream supports seeking
+
+getSize(): ?int                                        // Get stream size (if known)
+getMetadata(?string $key = null): mixed                // Get stream metadata
+
+close(): void                                          // Close stream and free resources
+detach(): resource|null                                // Detach underlying resource
+
+__toString(): string                                   // Get entire stream contents
+```
+
+### UploadedFile
+
+#### PSR-7 UploadedFileInterface Methods
+
+```php
+getStream(): StreamInterface                           // Get file contents as stream
+moveTo(string $targetPath): void                       // Move file to new location
+getSize(): ?int                                        // Get file size in bytes
+getError(): int                                        // Get upload error code (UPLOAD_ERR_*)
+getClientFilename(): ?string                           // Get original client filename
+getClientMediaType(): ?string                          // Get client-provided MIME type
+```
+
+## Performance
+
+The extension provides significant performance improvements over userland PSR-7 implementations through native C code, direct superglobal access, and zero-copy operations. Benchmarks comparing against other PSR-7 implementations can be found in the [http-php repository](https://github.com/signalforge/http-php).
+
+### Key Optimizations
+
+- **Direct superglobal access** - bypasses PHP's array layer for $_SERVER, $_GET, $_POST, $_COOKIE, $_FILES
+- **Zero-copy string streams** - reference strings directly without data duplication
+- **Native hash tables** - efficient storage and lookup for headers and parameters
+- **Lazy evaluation** - parse JSON/form data only when accessed
+- **Immutable operations** - efficient object cloning with shared data structures
+- **Memory efficient** - proper reference counting and cleanup
+
+## How It Works
+
+### Request Capture Process
+
+1. **Direct superglobal access** - References $_SERVER, $_GET, $_POST, $_COOKIE, $_FILES directly
+2. **Lazy header parsing** - Headers parsed only when `getHeaders()` is called
+3. **JSON caching** - Parsed JSON bodies cached to avoid re-parsing
+4. **Immutable cloning** - `with*()` methods create efficient clones with shared data
+
+### Stream Operations
+
+- **String streams**: TRUE zero-copy references to existing strings (no data duplication)
+- **Resource streams**: Efficient `php_stream_copy_to_mem()` for large data
+- **Lazy loading**: Stream contents read only when accessed
+- **Position tracking**: Efficient position management for seekable streams
+
+### Memory Management
+
+- **Reference counting**: Proper Zend reference counting throughout
+- **Object pooling**: Reuses memory structures where possible
+- **Automatic cleanup**: Destructors handle resource cleanup
+- **Leak prevention**: All allocations properly tracked and freed
+
+## Structure
+
+```
+http/
+├── config.m4                    # Build configuration
+├── signalforge_http.c           # PHP class implementations
+├── php_signalforge_http.h       # Main header
+├── src/
+│   ├── request.c/h              # Request class implementation
+│   ├── response.c/h             # Response class implementation
+│   ├── stream.c/h               # Stream class implementation
+│   ├── uploadedfile.c/h         # UploadedFile class implementation
+│   ├── psr7_interfaces.c/h      # PSR-7 interface definitions
+├── Signalforge/Http/            # IDE stubs
+├── examples/                    # Usage examples
+├── tests/                       # phpt test files (97 tests)
+└── Dockerfile                   # Docker build environment
+```
+
+## Testing
+
+```bash
+make test
+```
+
+Or run specific tests:
+
+```bash
+docker run --rm signalforge-http php /opt/run-tests.php tests/001_basic.phpt
+```
+
+## Memory Leak Detection
+
+```bash
+make valgrind-test
+```
+
+## Thread Safety
+
+The extension supports ZTS (Zend Thread Safety) builds. Each request gets isolated instances, and all operations are thread-safe.
+
+## Exception Handling
+
+- `InvalidArgumentException` - Invalid parameters or malformed data
+- `RuntimeException` - Stream operations, file access errors
+- Standard PHP exceptions for JSON parsing errors
+
+## License
+
+MIT License
+
