@@ -912,27 +912,25 @@ PHP_METHOD(Signalforge_Http_Response, json)
         RETURN_THROWS();
     }
     
-    /* Create Response */
+    /* Create Response (ht_headers and protocol_version initialized by create_object) */
     object_init_ex(return_value, signalforge_response_ce);
     intern = Z_SIGNALFORGE_RESPONSE_P(return_value);
-    
+
     intern->status_code = status;
     intern->reason_phrase = NULL;
-    
-    /* Set Content-Type header */
-    ALLOC_HASHTABLE(intern->ht_headers);
-    zend_hash_init(intern->ht_headers, 16, NULL, ZVAL_PTR_DTOR, 0);
+
+    /* Set Content-Type header (ht_headers already initialized by create_object) */
     zval content_type_val;
     ZVAL_STRING(&content_type_val, "application/json");
     zend_string *ct_key = zend_string_init("content-type", sizeof("content-type")-1, 0);
     zend_hash_add(intern->ht_headers, ct_key, &content_type_val);
     zend_string_release(ct_key);
-    
+
     /* Set body */
     ZVAL_COPY(&intern->zv_body, &stream_zv);
     intern->body_is_stream = 1;
-    intern->protocol_version = zend_string_init("1.1", 3, 1);
-    
+    /* protocol_version already set to "1.1" by create_object */
+
     zval_ptr_dtor(&stream_zv);
 }
 /* }}} */
@@ -968,27 +966,25 @@ PHP_METHOD(Signalforge_Http_Response, text)
         RETURN_THROWS();
     }
     
-    /* Create Response */
+    /* Create Response (ht_headers and protocol_version initialized by create_object) */
     object_init_ex(return_value, signalforge_response_ce);
     intern = Z_SIGNALFORGE_RESPONSE_P(return_value);
-    
+
     intern->status_code = status;
     intern->reason_phrase = NULL;
-    
-    /* Set Content-Type header */
-    ALLOC_HASHTABLE(intern->ht_headers);
-    zend_hash_init(intern->ht_headers, 16, NULL, ZVAL_PTR_DTOR, 0);
+
+    /* Set Content-Type header (ht_headers already initialized by create_object) */
     zval content_type_val;
     ZVAL_STRING(&content_type_val, "text/plain");
     zend_string *ct_key = zend_string_init("content-type", sizeof("content-type")-1, 0);
     zend_hash_add(intern->ht_headers, ct_key, &content_type_val);
     zend_string_release(ct_key);
-    
+
     /* Set body */
     ZVAL_COPY(&intern->zv_body, &stream_zv);
     intern->body_is_stream = 1;
-    intern->protocol_version = zend_string_init("1.1", 3, 1);
-    
+    /* protocol_version already set to "1.1" by create_object */
+
     zval_ptr_dtor(&stream_zv);
 }
 /* }}} */
@@ -1024,27 +1020,25 @@ PHP_METHOD(Signalforge_Http_Response, html)
         RETURN_THROWS();
     }
     
-    /* Create Response */
+    /* Create Response (ht_headers and protocol_version initialized by create_object) */
     object_init_ex(return_value, signalforge_response_ce);
     intern = Z_SIGNALFORGE_RESPONSE_P(return_value);
-    
+
     intern->status_code = status;
     intern->reason_phrase = NULL;
-    
-    /* Set Content-Type header */
-    ALLOC_HASHTABLE(intern->ht_headers);
-    zend_hash_init(intern->ht_headers, 16, NULL, ZVAL_PTR_DTOR, 0);
+
+    /* Set Content-Type header (ht_headers already initialized by create_object) */
     zval content_type_val;
     ZVAL_STRING(&content_type_val, "text/html");
     zend_string *ct_key = zend_string_init("content-type", sizeof("content-type")-1, 0);
     zend_hash_add(intern->ht_headers, ct_key, &content_type_val);
     zend_string_release(ct_key);
-    
+
     /* Set body */
     ZVAL_COPY(&intern->zv_body, &stream_zv);
     intern->body_is_stream = 1;
-    intern->protocol_version = zend_string_init("1.1", 3, 1);
-    
+    /* protocol_version already set to "1.1" by create_object */
+
     zval_ptr_dtor(&stream_zv);
 }
 /* }}} */
@@ -1069,26 +1063,24 @@ PHP_METHOD(Signalforge_Http_Response, redirect)
         RETURN_THROWS();
     }
     
-    /* Create Response */
+    /* Create Response (ht_headers and protocol_version initialized by create_object) */
     object_init_ex(return_value, signalforge_response_ce);
     intern = Z_SIGNALFORGE_RESPONSE_P(return_value);
-    
+
     intern->status_code = status;
     intern->reason_phrase = NULL;
-    
-    /* Set Location header */
-    ALLOC_HASHTABLE(intern->ht_headers);
-    zend_hash_init(intern->ht_headers, 16, NULL, ZVAL_PTR_DTOR, 0);
+
+    /* Set Location header (ht_headers already initialized by create_object) */
     zval location_val;
     ZVAL_STR(&location_val, zend_string_copy(url));
     zend_string *loc_key = zend_string_init("location", sizeof("location")-1, 0);
     zend_hash_add(intern->ht_headers, loc_key, &location_val);
     zend_string_release(loc_key);
-    
+
     /* No body for redirects */
     ZVAL_NULL(&intern->zv_body);
     intern->body_is_stream = 0;
-    intern->protocol_version = zend_string_init("1.1", 3, 1);
+    /* protocol_version already set to "1.1" by create_object */
 }
 /* }}} */
 

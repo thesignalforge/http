@@ -1,5 +1,8 @@
 # Signalforge HTTP Extension
 
+[![CI](https://github.com/signalforge/http/actions/workflows/ci.yml/badge.svg)](https://github.com/signalforge/http/actions/workflows/ci.yml)
+[![PHP 8.3+](https://img.shields.io/badge/PHP-8.3%2B-blue.svg)](https://php.net)
+
 A native PHP extension implementing high-performance PSR-7 HTTP Request and Response classes with zero-copy operations and direct superglobal access.
 
 ## What's Different
@@ -36,7 +39,7 @@ HTTP request/response handling is invoked on nearly every request, often hundred
 
 ## Requirements
 
-- PHP 8.3+
+- PHP 8.3, 8.4, or 8.5
 - Linux or macOS (tested on x86_64 and ARM64)
 - php-fpm recommended (works in CLI for testing)
 
@@ -55,6 +58,9 @@ make docker-build
 # Run tests
 make docker-test
 
+# Test all PHP versions (8.3, 8.4, 8.5)
+make ci-test-all
+
 # Run example
 make docker-example
 ```
@@ -71,8 +77,6 @@ sudo make install
 ```
 
 Then add `extension=signalforge_http.so` to your php.ini.
-
-See [INSTALL.md](INSTALL.md) for detailed instructions.
 
 ## Usage
 
@@ -198,8 +202,8 @@ $remaining = $stream->getContents();               // Get rest: " World"
 $stream->rewind();                                 // Reset to beginning
 $all = (string) $stream;                           // Get entire contents
 
-// Writing operations
-$writableStream = Stream::fromString('');          // Empty writable stream
+// Writing operations (use file or resource streams for writing)
+$writableStream = Stream::fromFile('/tmp/output.txt', 'w+');
 $bytesWritten = $writableStream->write('Hello');   // Write data
 $writableStream->write(' World');                  // Append more
 
@@ -548,6 +552,10 @@ docker run --rm signalforge-http php /opt/run-tests.php tests/001_basic.phpt
 ## Memory Leak Detection
 
 ```bash
+# Docker-based Valgrind (recommended)
+make valgrind-docker
+
+# Local Valgrind (requires valgrind installed)
 make valgrind-test
 ```
 

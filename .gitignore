@@ -44,3 +44,7 @@ tests/*.sh
 *~
 .DS_Store
 
+.claude
+.claude/*
+
+valgrind-output.txt
