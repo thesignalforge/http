@@ -687,6 +687,7 @@ PHP_METHOD(Signalforge_Http_Response, withHeader)
         ZVAL_COPY(&header_val, value);
     } else {
         array_init(&header_val);
+        Z_TRY_ADDREF_P(value);
         add_next_index_zval(&header_val, value);
     }
     
