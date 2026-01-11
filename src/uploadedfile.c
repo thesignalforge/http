@@ -211,6 +211,84 @@ signalforge_uploadedfile_object *signalforge_uploadedfile_from_files_array(zval 
 }
 
 /* ============================================================================
+ * PSR-17 Factory Method
+ * ============================================================================ */
+
+/**
+ * Create a new UploadedFile instance.
+ *
+ * PSR-17 factory method for creating UploadedFile instances programmatically.
+ *
+ * @param StreamInterface $stream The underlying stream representing the uploaded file content
+ * @param int|null $size The size of the file in bytes
+ * @param int $error The PHP file upload error constant
+ * @param string|null $clientFilename The filename as provided by the client
+ * @param string|null $clientMediaType The media type as provided by the client
+ * @return UploadedFile New uploaded file instance
+ */
+PHP_METHOD(Signalforge_Http_UploadedFile, create)
+{
+    signalforge_uploadedfile_object *intern;
+    zval *stream_param;
+    zend_long size = 0;
+    zend_bool size_is_null = 1;
+    zend_long error = 0; /* UPLOAD_ERR_OK */
+    zend_string *client_filename = NULL;
+    zend_string *client_media_type = NULL;
+
+    ZEND_PARSE_PARAMETERS_START(1, 5)
+        Z_PARAM_OBJECT_OF_CLASS(stream_param, signalforge_stream_ce)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_LONG_OR_NULL(size, size_is_null)
+        Z_PARAM_LONG(error)
+        Z_PARAM_STR_OR_NULL(client_filename)
+        Z_PARAM_STR_OR_NULL(client_media_type)
+    ZEND_PARSE_PARAMETERS_END();
+
+    /* Create new instance */
+    object_init_ex(return_value, signalforge_uploadedfile_ce);
+    intern = Z_SIGNALFORGE_UPLOADEDFILE_P(return_value);
+
+    /* Store the stream reference */
+    ZVAL_COPY(&intern->zv_stream, stream_param);
+    intern->stream_loaded = 1;
+
+    /* Set size */
+    if (!size_is_null) {
+        intern->size = size;
+    } else {
+        /* Try to get size from stream */
+        signalforge_stream_object *stream_intern = Z_SIGNALFORGE_STREAM_P(stream_param);
+        if (stream_intern->size >= 0) {
+            intern->size = stream_intern->size;
+        } else {
+            intern->size = 0;
+        }
+    }
+
+    /* Set error */
+    intern->error = error;
+
+    /* Set client filename */
+    if (client_filename) {
+        intern->client_filename = zend_string_copy(client_filename);
+    } else {
+        intern->client_filename = NULL;
+    }
+
+    /* Set client media type */
+    if (client_media_type) {
+        intern->client_media_type = zend_string_copy(client_media_type);
+    } else {
+        intern->client_media_type = NULL;
+    }
+
+    /* No tmp_name for programmatically created files */
+    intern->tmp_name = NULL;
+}
+/* }}} */
+
+/* ============================================================================
  * PSR-7 UploadedFileInterface Methods
  * ============================================================================ */
 
@@ -477,6 +555,14 @@ PHP_METHOD(Signalforge_Http_UploadedFile, getClientMediaType)
  * ARGINFO DEFINITIONS
  * ============================================================================ */
 
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_uploadedfile_create, 0, 1, Signalforge\\NativeHttp\\UploadedFile, 0)
+    ZEND_ARG_OBJ_INFO(0, stream, Signalforge\\NativeHttp\\Stream, 0)
+    ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, size, IS_LONG, 1, "null")
+    ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, error, IS_LONG, 0, "0")
+    ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, clientFilename, IS_STRING, 1, "null")
+    ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, clientMediaType, IS_STRING, 1, "null")
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_uploadedfile_getStream, 0, 0, Psr\\Http\\Message\\StreamInterface, 0)
 ZEND_END_ARG_INFO()
 
@@ -501,6 +587,7 @@ ZEND_END_ARG_INFO()
  * ============================================================================ */
 
 static const zend_function_entry signalforge_uploadedfile_methods[] = {
+    PHP_ME(Signalforge_Http_UploadedFile, create, arginfo_uploadedfile_create, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
     PHP_ME(Signalforge_Http_UploadedFile, getStream, arginfo_uploadedfile_getStream, ZEND_ACC_PUBLIC)
     PHP_ME(Signalforge_Http_UploadedFile, moveTo, arginfo_uploadedfile_moveTo, ZEND_ACC_PUBLIC)
     PHP_ME(Signalforge_Http_UploadedFile, getSize, arginfo_uploadedfile_getSize, ZEND_ACC_PUBLIC)

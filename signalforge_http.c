@@ -20,6 +20,7 @@
 #include "src/response.h"
 #include "src/stream.h"
 #include "src/uploadedfile.h"
+#include "src/uri.h"
 
 /* Module globals declaration */
 ZEND_DECLARE_MODULE_GLOBALS(signalforge_http)
@@ -61,6 +62,7 @@ PHP_MINIT_FUNCTION(signalforge_http)
 #endif
 
     /* Register classes */
+    signalforge_uri_register_class();  /* Uri first - Request depends on it */
     signalforge_request_register_class();
     signalforge_response_register_class();
     signalforge_stream_register_class();
@@ -89,12 +91,7 @@ PHP_RSHUTDOWN_FUNCTION(signalforge_http)
     ZEND_TSRMLS_CACHE_UPDATE();
 #endif
 
-    /* Clean up any cached objects or resources that might persist between tests */
-    /* This ensures proper isolation between test runs */
-
-    /* Force garbage collection to clean up any lingering object references */
-    gc_collect_cycles();
-
+    /* No per-request cleanup needed - all resources freed via free_obj handlers */
     return SUCCESS;
 }
 

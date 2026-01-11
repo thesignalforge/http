@@ -16,8 +16,8 @@
 #include "response.h"  // For signalforge_validate_header_name
 #include "stream.h"
 #include "uploadedfile.h"
+#include "uri.h"
 #include "zend_smart_str.h"
-#include "ext/standard/php_string.h"
 #include "ext/json/php_json.h"
 #include <sys/stat.h>
 #include <ctype.h>
@@ -146,6 +146,19 @@ static void signalforge_request_free_object(zend_object *object)
 
     /* Destroy standard object properties */
     zend_object_std_dtor(&intern->std);
+}
+
+/* Forward declaration for clone */
+signalforge_request_object *signalforge_request_clone(signalforge_request_object *src, zval *return_value);
+
+static zend_object *signalforge_request_clone_obj(zend_object *object)
+{
+    signalforge_request_object *old_intern = signalforge_request_from_obj(object);
+    zval new_zv;
+
+    /* Use existing zero-copy clone helper */
+    signalforge_request_clone(old_intern, &new_zv);
+    return Z_OBJ(new_zv);
 }
 
 /* ============================================================================
@@ -759,8 +772,179 @@ PHP_METHOD(Signalforge_Http_Request, capture)
     /* Build normalized headers HashTable */
     intern->ht_headers = signalforge_extract_headers(Z_ARRVAL(intern->zv_server));
 
+    /* Set default protocol version - non-persistent (per-request allocation) */
+    intern->protocol_version = zend_string_init("1.1", sizeof("1.1") - 1, 0);
+}
+/* }}} */
+
+/* {{{ proto Request Request::create(string $method, mixed $uri, array $serverParams = [])
+ * Creates a new Request instance with the specified method and URI.
+ * This is the PSR-17 factory method for creating Request instances programmatically.
+ *
+ * @param string $method HTTP method (GET, POST, PUT, DELETE, etc.)
+ * @param mixed $uri URI string or Uri object
+ * @param array $serverParams Optional server parameters
+ * @return Request New request instance
+ * @throws InvalidArgumentException When method is invalid
+ */
+PHP_METHOD(Signalforge_Http_Request, create)
+{
+    signalforge_request_object *intern;
+    zend_string *method;
+    zval *uri_param = NULL;
+    zval *server_params = NULL;
+    zend_string *uri_str = NULL;
+
+    ZEND_PARSE_PARAMETERS_START(2, 3)
+        Z_PARAM_STR(method)
+        Z_PARAM_ZVAL(uri_param)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY_OR_NULL(server_params)
+    ZEND_PARSE_PARAMETERS_END();
+
+    /* Validate HTTP method */
+    const char *method_str = ZSTR_VAL(method);
+    size_t method_len = ZSTR_LEN(method);
+    zend_bool valid = 0;
+
+    if (method_len == 3) {
+        if (strncasecmp(method_str, "GET", 3) == 0) valid = 1;
+        else if (strncasecmp(method_str, "PUT", 3) == 0) valid = 1;
+    } else if (method_len == 4) {
+        if (strncasecmp(method_str, "POST", 4) == 0) valid = 1;
+        else if (strncasecmp(method_str, "HEAD", 4) == 0) valid = 1;
+    } else if (method_len == 5) {
+        if (strncasecmp(method_str, "PATCH", 5) == 0) valid = 1;
+        else if (strncasecmp(method_str, "TRACE", 5) == 0) valid = 1;
+    } else if (method_len == 6) {
+        if (strncasecmp(method_str, "DELETE", 6) == 0) valid = 1;
+    } else if (method_len == 7) {
+        if (strncasecmp(method_str, "OPTIONS", 7) == 0) valid = 1;
+        else if (strncasecmp(method_str, "CONNECT", 7) == 0) valid = 1;
+    }
+
+    if (!valid) {
+        zend_throw_exception_ex(spl_ce_InvalidArgumentException, 0,
+            "Invalid HTTP method '%s'. Must be one of: GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, TRACE, CONNECT",
+            method_str);
+        RETURN_THROWS();
+    }
+
+    /* Extract URI string from parameter */
+    if (Z_TYPE_P(uri_param) == IS_STRING) {
+        uri_str = Z_STR_P(uri_param);
+    } else if (Z_TYPE_P(uri_param) == IS_OBJECT && instanceof_function(Z_OBJCE_P(uri_param), signalforge_uri_ce)) {
+        /* Uri object - convert to string */
+        signalforge_uri_object *uri_obj = Z_SIGNALFORGE_URI_P(uri_param);
+        smart_str buf = {0};
+
+        if (uri_obj->scheme && ZSTR_LEN(uri_obj->scheme) > 0) {
+            smart_str_append(&buf, uri_obj->scheme);
+            smart_str_appendl(&buf, "://", 3);
+        }
+        if (uri_obj->host && ZSTR_LEN(uri_obj->host) > 0) {
+            if (uri_obj->user && ZSTR_LEN(uri_obj->user) > 0) {
+                smart_str_append(&buf, uri_obj->user);
+                if (uri_obj->pass && ZSTR_LEN(uri_obj->pass) > 0) {
+                    smart_str_appendc(&buf, ':');
+                    smart_str_append(&buf, uri_obj->pass);
+                }
+                smart_str_appendc(&buf, '@');
+            }
+            smart_str_append(&buf, uri_obj->host);
+            if (uri_obj->port != SIGNALFORGE_PORT_UNSET &&
+                !signalforge_is_standard_port(uri_obj->scheme, uri_obj->port)) {
+                smart_str_appendc(&buf, ':');
+                smart_str_append_long(&buf, uri_obj->port);
+            }
+        }
+        if (uri_obj->path && ZSTR_LEN(uri_obj->path) > 0) {
+            smart_str_append(&buf, uri_obj->path);
+        } else if (!uri_obj->host || ZSTR_LEN(uri_obj->host) == 0) {
+            smart_str_appendc(&buf, '/');
+        }
+        if (uri_obj->query && ZSTR_LEN(uri_obj->query) > 0) {
+            smart_str_appendc(&buf, '?');
+            smart_str_append(&buf, uri_obj->query);
+        }
+        if (uri_obj->fragment && ZSTR_LEN(uri_obj->fragment) > 0) {
+            smart_str_appendc(&buf, '#');
+            smart_str_append(&buf, uri_obj->fragment);
+        }
+
+        smart_str_0(&buf);
+        uri_str = buf.s ? buf.s : zend_empty_string;
+    } else {
+        zend_throw_exception(spl_ce_InvalidArgumentException,
+            "URI must be a string or Uri object", 0);
+        RETURN_THROWS();
+    }
+
+    /* Create new instance */
+    object_init_ex(return_value, signalforge_request_ce);
+    intern = Z_SIGNALFORGE_REQUEST_P(return_value);
+
+    /* Initialize with serverParams or empty arrays */
+    if (server_params && Z_TYPE_P(server_params) == IS_ARRAY) {
+        ZVAL_COPY(&intern->zv_server, server_params);
+    } else {
+        array_init(&intern->zv_server);
+    }
+
+    /* Initialize empty superglobal arrays */
+    array_init(&intern->zv_get);
+    array_init(&intern->zv_post);
+    array_init(&intern->zv_cookie);
+    array_init(&intern->zv_files);
+
+    /* Initialize attributes HashTable */
+    ALLOC_HASHTABLE(intern->ht_attributes);
+    zend_hash_init(intern->ht_attributes, 8, NULL, ZVAL_PTR_DTOR, 0);
+
+    /* Set the URI */
+    ZVAL_STR_COPY(&intern->zv_uri, uri_str);
+    intern->request_uri = Z_STRVAL(intern->zv_uri);
+    intern->request_uri_len = Z_STRLEN(intern->zv_uri);
+
+    /* Set query string if present in URI */
+    const char *query_pos = strchr(Z_STRVAL(intern->zv_uri), '?');
+    if (query_pos) {
+        size_t query_len = Z_STRLEN(intern->zv_uri) - (query_pos - Z_STRVAL(intern->zv_uri)) - 1;
+        ZVAL_STRINGL(&intern->zv_query_string, query_pos + 1, query_len);
+        intern->query_string = Z_STRVAL(intern->zv_query_string);
+        intern->query_string_len = query_len;
+    } else {
+        ZVAL_EMPTY_STRING(&intern->zv_query_string);
+        intern->query_string = Z_STRVAL(intern->zv_query_string);
+        intern->query_string_len = 0;
+    }
+
+    /* Set the method (uppercase) */
+    zend_string *upper_method = zend_string_init(method_str, method_len, 0);
+    signalforge_strtoupper(ZSTR_VAL(upper_method), ZSTR_LEN(upper_method));
+    ZVAL_STR(&intern->zv_method, upper_method);
+    intern->flags |= SF_REQ_FLAG_METHOD_RESOLVED;
+
+    /* Also set request_method for consistency */
+    ZVAL_STR_COPY(&intern->zv_request_method, upper_method);
+    intern->request_method = Z_STRVAL(intern->zv_request_method);
+    intern->request_method_len = Z_STRLEN(intern->zv_request_method);
+
+    /* Initialize undefined zvals */
+    ZVAL_UNDEF(&intern->zv_method_override_header);
+    ZVAL_UNDEF(&intern->zv_method_override_post);
+    ZVAL_UNDEF(&intern->zv_body);
+    ZVAL_UNDEF(&intern->zv_json);
+    ZVAL_UNDEF(&intern->zv_path);
+    ZVAL_UNDEF(&intern->zv_content_type);
+
+    /* Initialize empty headers (will be built lazily from server params if needed) */
+    ALLOC_HASHTABLE(intern->ht_headers);
+    zend_hash_init(intern->ht_headers, 8, NULL, ZVAL_PTR_DTOR, 0);
+    intern->flags |= SF_REQ_FLAG_HEADERS_EXTRACTED;
+
     /* Set default protocol version */
-    intern->protocol_version = zend_string_init("1.1", sizeof("1.1") - 1, 1);
+    intern->protocol_version = zend_string_init("1.1", sizeof("1.1") - 1, 0);
 }
 /* }}} */
 
@@ -1138,7 +1322,8 @@ PHP_METHOD(Signalforge_Http_Request, getBody)
 
     /* Return stored body stream if one was set with withBody() */
     if (!Z_ISUNDEF(intern->zv_body)) {
-        RETURN_ZVAL(&intern->zv_body, 0, 1);
+        /* Return a copy - don't destroy source since object still owns it */
+        RETURN_ZVAL(&intern->zv_body, 1, 0);
     }
 
     /* Otherwise, create stream from raw body string */
@@ -1304,103 +1489,234 @@ PHP_METHOD(Signalforge_Http_Request, withMethod)
 /**
  * Get the URI for this request.
  *
- * Returns the reconstructed URI string from $_SERVER data.
- * In this basic implementation, returns the URI as a string rather than
- * a full UriInterface object. The URI is reconstructed from REQUEST_URI
- * and other server variables.
+ * Returns a UriInterface object representing the request URI.
+ * If an absolute URI was set via withUri(), returns that.
+ * Otherwise, reconstructs from $_SERVER data (REQUEST_URI, HTTP_HOST, etc).
  *
- * @return string Request URI
+ * @return UriInterface Request URI object
  */
 PHP_METHOD(Signalforge_Http_Request, getUri)
 {
     signalforge_request_object *intern = Z_SIGNALFORGE_REQUEST_P(ZEND_THIS);
     ZEND_PARSE_PARAMETERS_NONE();
-    
-    /* Return URI as string (basic implementation, not full UriInterface) */
-    if (Z_TYPE(intern->zv_uri) == IS_STRING) {
-        RETURN_ZVAL(&intern->zv_uri, 1, 0);
+
+    /* Check if stored URI is already an absolute URI (contains ://) */
+    if (Z_TYPE(intern->zv_uri) == IS_STRING && Z_STRLEN(intern->zv_uri) > 0) {
+        const char *uri_str = Z_STRVAL(intern->zv_uri);
+        size_t uri_len = Z_STRLEN(intern->zv_uri);
+
+        /* If URI contains "://", it's absolute - use it directly */
+        if (strstr(uri_str, "://") != NULL) {
+            zend_object *uri_obj = signalforge_uri_create_from_string(uri_str, uri_len);
+            RETURN_OBJ(uri_obj);
+        }
     }
-    RETURN_EMPTY_STRING();
+
+    /* Build full URI from server params */
+    smart_str uri_buf = {0};
+
+    /* Get scheme (https or http) */
+    zval *https = NULL;
+    if (Z_TYPE(intern->zv_server) == IS_ARRAY) {
+        https = zend_hash_str_find(Z_ARRVAL(intern->zv_server), "HTTPS", sizeof("HTTPS")-1);
+    }
+    if (https && Z_TYPE_P(https) == IS_STRING &&
+        strcasecmp(Z_STRVAL_P(https), "off") != 0 && Z_STRLEN_P(https) > 0) {
+        smart_str_appendl(&uri_buf, "https://", 8);
+    } else {
+        smart_str_appendl(&uri_buf, "http://", 7);
+    }
+
+    /* Get host */
+    zval *host = NULL;
+    if (Z_TYPE(intern->zv_server) == IS_ARRAY) {
+        host = zend_hash_str_find(Z_ARRVAL(intern->zv_server), "HTTP_HOST", sizeof("HTTP_HOST")-1);
+        if (!host) {
+            host = zend_hash_str_find(Z_ARRVAL(intern->zv_server), "SERVER_NAME", sizeof("SERVER_NAME")-1);
+        }
+    }
+    if (host && Z_TYPE_P(host) == IS_STRING) {
+        smart_str_appendl(&uri_buf, Z_STRVAL_P(host), Z_STRLEN_P(host));
+    } else {
+        smart_str_appendl(&uri_buf, "localhost", 9);
+    }
+
+    /* Get path from stored URI or REQUEST_URI */
+    if (Z_TYPE(intern->zv_uri) == IS_STRING && Z_STRLEN(intern->zv_uri) > 0) {
+        smart_str_appendl(&uri_buf, Z_STRVAL(intern->zv_uri), Z_STRLEN(intern->zv_uri));
+    } else if (intern->request_uri && intern->request_uri_len > 0) {
+        smart_str_appendl(&uri_buf, intern->request_uri, intern->request_uri_len);
+    } else {
+        smart_str_appendl(&uri_buf, "/", 1);
+    }
+
+    smart_str_0(&uri_buf);
+
+    /* Create Uri object from the string */
+    if (uri_buf.s) {
+        zend_object *uri_obj = signalforge_uri_create_from_string(ZSTR_VAL(uri_buf.s), ZSTR_LEN(uri_buf.s));
+        RETVAL_OBJ(uri_obj);
+        smart_str_free(&uri_buf);
+    } else {
+        /* Fallback: create empty Uri */
+        object_init_ex(return_value, signalforge_uri_ce);
+    }
 }
 /* }}} */
 
-/* {{{ withUri(UriInterface $uri, $preserveHost = false) */
+/* {{{ withUri(UriInterface|string $uri, $preserveHost = false) */
 PHP_METHOD(Signalforge_Http_Request, withUri)
 {
     zval *uri;
     zend_bool preserve_host = 0;
     signalforge_request_object *src, *dst;
-    zval uri_string_zv;
-    
+    zend_string *uri_str = NULL;
+    signalforge_uri_object *uri_obj = NULL;
+
     ZEND_PARSE_PARAMETERS_START(1, 2)
         Z_PARAM_ZVAL(uri)
         Z_PARAM_OPTIONAL
         Z_PARAM_BOOL(preserve_host)
     ZEND_PARSE_PARAMETERS_END();
-    
-    /* Validate URI type - only strings are accepted in this basic implementation */
-    if (Z_TYPE_P(uri) != IS_STRING) {
+
+    /* Accept both Uri objects and strings */
+    if (Z_TYPE_P(uri) == IS_OBJECT && instanceof_function(Z_OBJCE_P(uri), signalforge_uri_ce)) {
+        /* Uri object - get string representation */
+        uri_obj = Z_SIGNALFORGE_URI_P(uri);
+
+        /* Build URI string from object */
+        smart_str buf = {0};
+
+        if (uri_obj->scheme && ZSTR_LEN(uri_obj->scheme) > 0) {
+            smart_str_append(&buf, uri_obj->scheme);
+            smart_str_appendc(&buf, ':');
+        }
+        if (uri_obj->host && ZSTR_LEN(uri_obj->host) > 0) {
+            smart_str_appendl(&buf, "//", 2);
+            if (uri_obj->user && ZSTR_LEN(uri_obj->user) > 0) {
+                smart_str_append(&buf, uri_obj->user);
+                if (uri_obj->pass && ZSTR_LEN(uri_obj->pass) > 0) {
+                    smart_str_appendc(&buf, ':');
+                    smart_str_append(&buf, uri_obj->pass);
+                }
+                smart_str_appendc(&buf, '@');
+            }
+            smart_str_append(&buf, uri_obj->host);
+            if (uri_obj->port != SIGNALFORGE_PORT_UNSET &&
+                !signalforge_is_standard_port(uri_obj->scheme, uri_obj->port)) {
+                smart_str_appendc(&buf, ':');
+                smart_str_append_long(&buf, uri_obj->port);
+            }
+        }
+        if (uri_obj->path && ZSTR_LEN(uri_obj->path) > 0) {
+            if (uri_obj->host && ZSTR_LEN(uri_obj->host) > 0 &&
+                ZSTR_VAL(uri_obj->path)[0] != '/') {
+                smart_str_appendc(&buf, '/');
+            }
+            smart_str_append(&buf, uri_obj->path);
+        }
+        if (uri_obj->query && ZSTR_LEN(uri_obj->query) > 0) {
+            smart_str_appendc(&buf, '?');
+            smart_str_append(&buf, uri_obj->query);
+        }
+        if (uri_obj->fragment && ZSTR_LEN(uri_obj->fragment) > 0) {
+            smart_str_appendc(&buf, '#');
+            smart_str_append(&buf, uri_obj->fragment);
+        }
+
+        smart_str_0(&buf);
+        uri_str = buf.s ? buf.s : zend_string_init("", 0, 0);
+    } else if (Z_TYPE_P(uri) == IS_STRING) {
+        /* String - use directly */
+        uri_str = zend_string_copy(Z_STR_P(uri));
+    } else {
         zend_throw_exception(spl_ce_InvalidArgumentException,
-            "URI must be a string", 0);
+            "URI must be a UriInterface or string", 0);
         RETURN_THROWS();
     }
 
-    ZVAL_COPY(&uri_string_zv, uri);
-    
     src = Z_SIGNALFORGE_REQUEST_P(ZEND_THIS);
     dst = signalforge_request_clone(src, return_value);
-    
+
     /* Update URI */
     if (!Z_ISUNDEF(dst->zv_uri)) zval_ptr_dtor(&dst->zv_uri);
-    ZVAL_COPY(&dst->zv_uri, &uri_string_zv);
-    if (Z_TYPE(dst->zv_uri) == IS_STRING) {
-        dst->request_uri = Z_STRVAL(dst->zv_uri);
-        dst->request_uri_len = Z_STRLEN(dst->zv_uri);
-    }
+    ZVAL_STR(&dst->zv_uri, zend_string_copy(uri_str));
+    dst->request_uri = Z_STRVAL(dst->zv_uri);
+    dst->request_uri_len = Z_STRLEN(dst->zv_uri);
 
     /* Handle Host header preservation */
     if (!preserve_host) {
-        /* Extract host from new URI and update Host header */
-        char *host_start = strstr(Z_STRVAL(uri_string_zv), "://");
-        if (host_start) {
-            host_start += 3; /* Skip "://" */
-            char *host_end = strchr(host_start, '/');
-            if (!host_end) {
-                host_end = strchr(host_start, '?');
-            }
-            if (!host_end) {
-                host_end = strchr(host_start, '#');
-            }
-            if (!host_end) {
-                host_end = Z_STRVAL(uri_string_zv) + Z_STRLEN(uri_string_zv);
-            }
+        zend_string *new_host = NULL;
+        zend_long new_port = SIGNALFORGE_PORT_UNSET;
 
-            size_t host_len = host_end - host_start;
-            if (host_len > 0) {
-                /* Ensure headers HashTable exists */
-                if (!dst->ht_headers) {
-                    ALLOC_HASHTABLE(dst->ht_headers);
-                    zend_hash_init(dst->ht_headers, 16, NULL, ZVAL_PTR_DTOR, 0);
+        if (uri_obj) {
+            /* Get host from Uri object */
+            if (uri_obj->host && ZSTR_LEN(uri_obj->host) > 0) {
+                new_host = uri_obj->host;
+                new_port = uri_obj->port;
+            }
+        } else {
+            /* Extract host from string */
+            char *host_start = strstr(ZSTR_VAL(uri_str), "://");
+            if (host_start) {
+                host_start += 3;
+                /* Skip userinfo if present */
+                char *at = strchr(host_start, '@');
+                char *slash = strchr(host_start, '/');
+                if (at && (!slash || at < slash)) {
+                    host_start = at + 1;
                 }
 
-                /* Create zval for host value */
-                zval host_val;
-                array_init(&host_val);
-                add_next_index_stringl(&host_val, host_start, host_len);
+                char *host_end = slash;
+                if (!host_end) host_end = strchr(host_start, '?');
+                if (!host_end) host_end = strchr(host_start, '#');
+                if (!host_end) host_end = ZSTR_VAL(uri_str) + ZSTR_LEN(uri_str);
 
-                /* Normalize header name and update */
-                zend_string *normalized = signalforge_normalize_header_name("host", sizeof("host")-1);
-                zend_hash_update(dst->ht_headers, normalized, &host_val);
-                zend_string_release(normalized);
+                if (host_end > host_start) {
+                    new_host = zend_string_init(host_start, host_end - host_start, 0);
+                }
+            }
+        }
+
+        if (new_host && ZSTR_LEN(new_host) > 0) {
+            /* Ensure headers HashTable exists */
+            if (!dst->ht_headers) {
+                ALLOC_HASHTABLE(dst->ht_headers);
+                zend_hash_init(dst->ht_headers, 16, NULL, ZVAL_PTR_DTOR, 0);
+            }
+
+            /* Build host value with port if non-standard */
+            smart_str host_buf = {0};
+            smart_str_append(&host_buf, new_host);
+            if (new_port != SIGNALFORGE_PORT_UNSET && new_port != 80 && new_port != 443) {
+                smart_str_appendc(&host_buf, ':');
+                smart_str_append_long(&host_buf, new_port);
+            }
+            smart_str_0(&host_buf);
+
+            /* Create zval for host value */
+            zval host_val;
+            array_init(&host_val);
+            if (host_buf.s) {
+                add_next_index_str(&host_val, host_buf.s);
+            }
+
+            /* Normalize header name and update */
+            zend_string *normalized = signalforge_normalize_header_name("host", sizeof("host")-1);
+            zend_hash_update(dst->ht_headers, normalized, &host_val);
+            zend_string_release(normalized);
+
+            /* Free temp host string if we allocated it */
+            if (!uri_obj && new_host) {
+                zend_string_release(new_host);
             }
         }
     }
-    /* If preserve_host is true, existing Host header is kept from the clone */
 
     /* Clear path cache */
     dst->flags &= ~SF_REQ_FLAG_PATH_PARSED;
-    
-    zval_ptr_dtor(&uri_string_zv);
+
+    zend_string_release(uri_str);
 }
 /* }}} */
 
@@ -1763,6 +2079,12 @@ PHP_METHOD(Signalforge_Http_Request, withoutAttribute)
 ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_request_capture, 0, 0, Signalforge\\NativeHttp\\Request, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_request_create, 0, 2, Signalforge\\NativeHttp\\Request, 0)
+    ZEND_ARG_TYPE_INFO(0, method, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, uri, IS_MIXED, 0)
+    ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, serverParams, IS_ARRAY, 1, "[]")
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_request_getProtocolVersion, 0, 0, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
@@ -1820,7 +2142,7 @@ ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_request_withMethod, 0, 1, Signalf
     ZEND_ARG_TYPE_INFO(0, method, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_request_getUri, 0, 0, IS_STRING, 0)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_request_getUri, 0, 0, Signalforge\\NativeHttp\\Uri, 0)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_request_withUri, 0, 1, Signalforge\\NativeHttp\\Request, 0)
@@ -1882,7 +2204,8 @@ ZEND_END_ARG_INFO()
 
 static const zend_function_entry signalforge_request_methods[] = {
     PHP_ME(Signalforge_Http_Request, capture, arginfo_request_capture, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
-    
+    PHP_ME(Signalforge_Http_Request, create, arginfo_request_create, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+
     /* MessageInterface */
     PHP_ME(Signalforge_Http_Request, getProtocolVersion, arginfo_request_getProtocolVersion, ZEND_ACC_PUBLIC)
     PHP_ME(Signalforge_Http_Request, withProtocolVersion, arginfo_request_withProtocolVersion, ZEND_ACC_PUBLIC)
@@ -1935,6 +2258,6 @@ void signalforge_request_register_class(void)
     memcpy(&signalforge_request_object_handlers, zend_get_std_object_handlers(), sizeof(zend_object_handlers));
     signalforge_request_object_handlers.offset = XtOffsetOf(signalforge_request_object, std);
     signalforge_request_object_handlers.free_obj = signalforge_request_free_object;
-
+    signalforge_request_object_handlers.clone_obj = signalforge_request_clone_obj;
 }
 

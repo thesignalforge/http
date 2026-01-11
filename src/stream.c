@@ -104,6 +104,15 @@ static void signalforge_stream_free_object(zend_object *object)
 #define signalforge_stream_is_detached(intern) \
     (Z_ISUNDEF((intern)->zv_resource) && !((intern)->string_data))
 
+/*
+ * Load stream metadata lazily into the hashtable cache.
+ *
+ * For resource-based streams, extracts metadata via stream_get_meta_data().
+ * For string-based streams, synthesizes compatible metadata (size, mode).
+ * Called on first getMetadata() access to avoid upfront cost.
+ *
+ * @param intern Stream object to load metadata for
+ */
 void signalforge_load_metadata(signalforge_stream_object *intern)
 {
     if (intern->metadata_loaded) {
