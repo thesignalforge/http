@@ -13,7 +13,7 @@ A native PHP extension implementing high-performance PSR-7 HTTP Request and Resp
 - **Lazy evaluation** - parse data only when accessed
 - **Immutable objects** - all `with*()` methods return new instances
 - **Memory efficient** - proper reference counting and cleanup
-- **PSR-7 compliant** - implements `ServerRequestInterface`, `ResponseInterface`, and `StreamInterface`
+- **PSR-7 compliant** - implements `ServerRequestInterface`, `ResponseInterface`, `StreamInterface`, `UriInterface`, and `UploadedFileInterface`
 - **Optimized for php-fpm** - designed for FastCGI environments
 - **No dependencies** - pure C extension with no external libraries
 
@@ -31,7 +31,7 @@ HTTP request/response handling is invoked on nearly every request, often hundred
 
 ## Features
 
-- **Full PSR-7 Compliance**: Implements `ServerRequestInterface`, `ResponseInterface`, and `StreamInterface`
+- **Full PSR-7 Compliance**: Implements `ServerRequestInterface`, `ResponseInterface`, `StreamInterface`, `UriInterface`, and `UploadedFileInterface`
 - **Zero Dependencies**: Pure C extension with no external libraries
 - **Hyper-Performance**: Direct HashTable access, zero-copy operations, lazy evaluation
 - **Immutable Objects**: All `with*()` methods return new instances
@@ -226,6 +226,47 @@ $uri = $stream->getMetadata('uri');                // Specific metadata key
 // Resource management
 $underlying = $stream->detach();                   // Detach PHP resource
 $stream->close();                                  // Close stream and free resources
+```
+
+### Uri
+
+```php
+<?php
+
+use Signalforge\NativeHttp\Uri;
+
+// Parse a URI string
+$uri = Uri::fromString('https://user:pass@example.com:8080/path?query=value#fragment');
+
+// Access components (PSR-7 UriInterface)
+$scheme = $uri->getScheme();       // "https"
+$userInfo = $uri->getUserInfo();   // "user:pass"
+$host = $uri->getHost();           // "example.com"
+$port = $uri->getPort();           // 8080 (null if standard port for scheme)
+$path = $uri->getPath();           // "/path"
+$query = $uri->getQuery();         // "query=value"
+$fragment = $uri->getFragment();   // "fragment"
+$authority = $uri->getAuthority(); // "user:pass@example.com:8080"
+
+// Serialize to string
+$uriString = (string) $uri;        // "https://user:pass@example.com:8080/path?query=value#fragment"
+
+// Immutable modifications
+$newUri = $uri
+    ->withScheme('http')
+    ->withHost('api.example.com')
+    ->withPort(null)               // Remove explicit port
+    ->withPath('/v2/users')
+    ->withQuery('limit=10')
+    ->withFragment('');
+
+// Original URI unchanged
+assert($uri->getHost() === 'example.com');
+assert($newUri->getHost() === 'api.example.com');
+
+// Standard ports are normalized to null
+$httpsUri = Uri::fromString('https://example.com:443/path');
+$port = $httpsUri->getPort();      // null (443 is standard for https)
 ```
 
 ### UploadedFile
@@ -482,6 +523,37 @@ getClientFilename(): ?string                           // Get original client fi
 getClientMediaType(): ?string                          // Get client-provided MIME type
 ```
 
+### Uri
+
+#### Factory Methods
+
+```php
+Uri::fromString(string $uri): UriInterface             // Parse URI string (RFC 3986 compliant)
+```
+
+#### PSR-7 UriInterface Methods
+
+```php
+getScheme(): string                                    // Get URI scheme (http, https, etc.)
+getAuthority(): string                                 // Get authority (userinfo@host:port)
+getUserInfo(): string                                  // Get user info (user:pass)
+getHost(): string                                      // Get host (lowercase)
+getPort(): ?int                                        // Get port (null if standard for scheme)
+getPath(): string                                      // Get path component
+getQuery(): string                                     // Get query string (without ?)
+getFragment(): string                                  // Get fragment (without #)
+
+withScheme(string $scheme): UriInterface               // Return new instance with scheme
+withUserInfo(string $user, ?string $pass = null): UriInterface // Set user info
+withHost(string $host): UriInterface                   // Set host
+withPort(?int $port): UriInterface                     // Set port (null to remove)
+withPath(string $path): UriInterface                   // Set path
+withQuery(string $query): UriInterface                 // Set query string
+withFragment(string $fragment): UriInterface           // Set fragment
+
+__toString(): string                                   // Serialize to URI string
+```
+
 ## Performance
 
 The extension provides significant performance improvements over userland PSR-7 implementations through native C code, direct superglobal access, and zero-copy operations. Benchmarks comparing against other PSR-7 implementations can be found in the [http-php repository](https://github.com/signalforge/http-php).
@@ -529,6 +601,7 @@ http/
 │   ├── request.c/h              # Request class implementation
 │   ├── response.c/h             # Response class implementation
 │   ├── stream.c/h               # Stream class implementation
+│   ├── uri.c/h                  # Uri class implementation
 │   ├── uploadedfile.c/h         # UploadedFile class implementation
 │   ├── psr7_interfaces.c/h      # PSR-7 interface definitions
 ├── Signalforge/Http/            # IDE stubs
@@ -568,6 +641,12 @@ The extension supports ZTS (Zend Thread Safety) builds. Each request gets isolat
 - `InvalidArgumentException` - Invalid parameters or malformed data
 - `RuntimeException` - Stream operations, file access errors
 - Standard PHP exceptions for JSON parsing errors
+
+## Related
+
+- [signalforge/http-php](https://github.com/signalforge/http-php) - PHP Composer package with PSR-7/PSR-17 wrappers
+- [PSR-7](https://www.php-fig.org/psr/psr-7/) - HTTP Message Interface specification
+- [PSR-17](https://www.php-fig.org/psr/psr-17/) - HTTP Factories specification
 
 ## License
 

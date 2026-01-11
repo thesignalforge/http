@@ -26,7 +26,8 @@ if test "$PHP_SIGNALFORGE_HTTP" != "no"; then
     src/request.c \
     src/response.c \
     src/stream.c \
-    src/uploadedfile.c,
+    src/uploadedfile.c \
+    src/uri.c,
     $ext_shared,,
     dnl Add ZTS-specific flags only when ZTS is enabled
     m4_ifdef([ZTS], [-DZEND_ENABLE_STATIC_TSRMLS_CACHE=1], []))
@@ -38,6 +39,6 @@ if test "$PHP_SIGNALFORGE_HTTP" != "no"; then
   PHP_ADD_INCLUDE($ext_srcdir/src)
 
   dnl Install headers for potential use by other extensions
-  PHP_INSTALL_HEADERS([ext/signalforge_http], [php_signalforge_http.h src/request.h src/response.h src/stream.h src/uploadedfile.h])
+  PHP_INSTALL_HEADERS([ext/signalforge_http], [php_signalforge_http.h src/request.h src/response.h src/stream.h src/uploadedfile.h src/uri.h])
 
 fi

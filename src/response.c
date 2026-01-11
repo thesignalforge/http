@@ -267,8 +267,8 @@ static zend_object *signalforge_response_create_object(zend_class_entry *ce)
     ZVAL_NULL(&intern->zv_body);
     intern->body_is_stream = 0;
 
-    /* Initialize protocol */
-    intern->protocol_version = zend_string_init("1.1", 3, 1);
+    /* Initialize protocol - non-persistent (per-request allocation) */
+    intern->protocol_version = zend_string_init("1.1", 3, 0);
 
 
     /* Initialize standard object */

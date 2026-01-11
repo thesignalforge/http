@@ -2,6 +2,13 @@
  * php_signalforge_http.h
  *
  * Main header file for Signalforge HTTP Extension
+ *
+ * ZTS (Zend Thread Safety) Compatibility:
+ * - All class entries are process-wide, initialized during MINIT
+ * - Object handlers are static and immutable after MINIT
+ * - Per-request data stored in object instances (not globals)
+ * - ZEND_TSRMLS_CACHE properly defined and updated in lifecycle hooks
+ * - Compatible with PHP 8.0+ ZTS builds (php-fpm worker threads)
  */
 
 #ifndef PHP_SIGNALFORGE_HTTP_H
@@ -24,6 +31,7 @@ extern zend_class_entry *signalforge_request_ce;
 extern zend_class_entry *signalforge_response_ce;
 extern zend_class_entry *signalforge_stream_ce;
 extern zend_class_entry *signalforge_uploadedfile_ce;
+extern zend_class_entry *signalforge_uri_ce;
 #define phpext_signalforge_http_ptr &signalforge_http_module_entry
 
 #define PHP_SIGNALFORGE_HTTP_VERSION "1.0.0"
