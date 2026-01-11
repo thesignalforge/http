@@ -373,11 +373,12 @@ void signalforge_resolve_method(signalforge_request_object *intern)
 
     /* Fall back to REQUEST_METHOD from stored zval */
     if (Z_TYPE(intern->zv_request_method) == IS_STRING) {
-        ZVAL_COPY(&intern->zv_method, &intern->zv_request_method);
-        /* Convert to uppercase for consistency */
-        if (Z_STRLEN(intern->zv_method) > 0) {
-            signalforge_strtoupper(Z_STRVAL(intern->zv_method), Z_STRLEN(intern->zv_method));
+        /* Create new writable string to avoid modifying shared/interned strings */
+        zend_string *method = zend_string_init(Z_STRVAL(intern->zv_request_method), Z_STRLEN(intern->zv_request_method), 0);
+        if (ZSTR_LEN(method) > 0) {
+            signalforge_strtoupper(ZSTR_VAL(method), ZSTR_LEN(method));
         }
+        ZVAL_STR(&intern->zv_method, method);
     } else {
         ZVAL_STRING(&intern->zv_method, "GET");
     }
@@ -906,6 +907,11 @@ PHP_METHOD(Signalforge_Http_Request, create)
     intern->request_uri = Z_STRVAL(intern->zv_uri);
     intern->request_uri_len = Z_STRLEN(intern->zv_uri);
 
+    /* Release temporary uri_str if it was created from Uri object conversion */
+    if (Z_TYPE_P(uri_param) == IS_OBJECT && instanceof_function(Z_OBJCE_P(uri_param), signalforge_uri_ce)) {
+        zend_string_release(uri_str);
+    }
+
     /* Set query string if present in URI */
     const char *query_pos = strchr(Z_STRVAL(intern->zv_uri), '?');
     if (query_pos) {
@@ -1122,6 +1128,11 @@ PHP_METHOD(Signalforge_Http_Request, getHeaderLine)
     }
     
     smart_str_0(&str);
+
+    /* Handle empty result (str.s may be NULL if nothing was appended) */
+    if (str.s == NULL) {
+        RETURN_EMPTY_STRING();
+    }
     RETURN_STR(str.s);
 }
 /* }}} */
@@ -1476,11 +1487,12 @@ PHP_METHOD(Signalforge_Http_Request, withMethod)
     
     src = Z_SIGNALFORGE_REQUEST_P(ZEND_THIS);
     dst = signalforge_request_clone(src, return_value);
-    
-    /* Set method */
+
+    /* Set method (create new string to avoid modifying shared/interned strings) */
     if (!Z_ISUNDEF(dst->zv_method)) zval_ptr_dtor(&dst->zv_method);
-    ZVAL_STR(&dst->zv_method, zend_string_copy(method));
-    signalforge_strtoupper(Z_STRVAL(dst->zv_method), Z_STRLEN(dst->zv_method));
+    zend_string *upper_method = zend_string_init(ZSTR_VAL(method), ZSTR_LEN(method), 0);
+    signalforge_strtoupper(ZSTR_VAL(upper_method), ZSTR_LEN(upper_method));
+    ZVAL_STR(&dst->zv_method, upper_method);
     dst->flags |= SF_REQ_FLAG_METHOD_RESOLVED;
 }
 /* }}} */

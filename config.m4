@@ -28,9 +28,7 @@ if test "$PHP_SIGNALFORGE_HTTP" != "no"; then
     src/stream.c \
     src/uploadedfile.c \
     src/uri.c,
-    $ext_shared,,
-    dnl Add ZTS-specific flags only when ZTS is enabled
-    m4_ifdef([ZTS], [-DZEND_ENABLE_STATIC_TSRMLS_CACHE=1], []))
+    $ext_shared,, -DZEND_ENABLE_STATIC_TSRMLS_CACHE=1)
 
   dnl Add header files
   PHP_ADD_BUILD_DIR($ext_builddir)
