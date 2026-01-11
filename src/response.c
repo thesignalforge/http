@@ -385,6 +385,7 @@ PHP_METHOD(Signalforge_Http_Response, create)
                 intern->body_is_stream = 1;
             }
             zval_ptr_dtor(&stream_zv);
+            zval_ptr_dtor(&body_zv);
         } else if (Z_TYPE_P(body) == IS_NULL) {
             /* Null body is allowed */
         } else {
