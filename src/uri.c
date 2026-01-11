@@ -149,6 +149,9 @@ int signalforge_parse_uri(const char *uri, size_t len, signalforge_uri_object *r
     }
 
     /* Store scheme (lowercase) - single allocation path */
+    if (result->scheme) {
+        zend_string_release(result->scheme);
+    }
     if (scheme_end) {
         size_t scheme_len = scheme_end - uri;
         result->scheme = zend_string_init_lowercase(uri, scheme_len);
@@ -180,6 +183,14 @@ int signalforge_parse_uri(const char *uri, size_t len, signalforge_uri_object *r
                 }
             }
 
+            /* Release existing user/pass if present (defensive) */
+            if (result->user) {
+                zend_string_release(result->user);
+            }
+            if (result->pass) {
+                zend_string_release(result->pass);
+            }
+
             if (colon) {
                 result->user = zend_string_init(auth, colon - auth, 0);
                 result->pass = zend_string_init(colon + 1, at - colon - 1, 0);
@@ -189,6 +200,13 @@ int signalforge_parse_uri(const char *uri, size_t len, signalforge_uri_object *r
             }
             auth = at + 1;
         } else {
+            /* Release existing user/pass if present (defensive) */
+            if (result->user) {
+                zend_string_release(result->user);
+            }
+            if (result->pass) {
+                zend_string_release(result->pass);
+            }
             result->user = NULL;
             result->pass = NULL;
         }
@@ -226,6 +244,9 @@ int signalforge_parse_uri(const char *uri, size_t len, signalforge_uri_object *r
         }
 
         /* Store host (lowercase) - single allocation path */
+        if (result->host) {
+            zend_string_release(result->host);
+        }
         if (host_end > host_start) {
             size_t host_len = host_end - host_start;
             result->host = zend_string_init_lowercase(host_start, host_len);
@@ -246,7 +267,16 @@ int signalforge_parse_uri(const char *uri, size_t len, signalforge_uri_object *r
             result->port = SIGNALFORGE_PORT_UNSET;
         }
     } else {
-        /* No authority */
+        /* No authority - defensive release */
+        if (result->user) {
+            zend_string_release(result->user);
+        }
+        if (result->pass) {
+            zend_string_release(result->pass);
+        }
+        if (result->host) {
+            zend_string_release(result->host);
+        }
         result->user = NULL;
         result->pass = NULL;
         result->host = NULL;  /* Getters return empty string for NULL */
@@ -254,6 +284,9 @@ int signalforge_parse_uri(const char *uri, size_t len, signalforge_uri_object *r
     }
 
     /* Store path */
+    if (result->path) {
+        zend_string_release(result->path);
+    }
     if (path_end > path_start) {
         result->path = zend_string_init(path_start, path_end - path_start, 0);
     } else {
@@ -261,6 +294,9 @@ int signalforge_parse_uri(const char *uri, size_t len, signalforge_uri_object *r
     }
 
     /* Store query (without ?) */
+    if (result->query) {
+        zend_string_release(result->query);
+    }
     if (query_start && query_end > query_start) {
         result->query = zend_string_init(query_start, query_end - query_start, 0);
     } else {
@@ -268,6 +304,9 @@ int signalforge_parse_uri(const char *uri, size_t len, signalforge_uri_object *r
     }
 
     /* Store fragment (without #) */
+    if (result->fragment) {
+        zend_string_release(result->fragment);
+    }
     if (fragment_start && end > fragment_start) {
         result->fragment = zend_string_init(fragment_start, end - fragment_start, 0);
     } else {
@@ -814,12 +853,16 @@ PHP_METHOD(Signalforge_Http_Uri, fromString)
 
     /* Release defaults */
     if (intern->scheme) zend_string_release(intern->scheme);
+    if (intern->user) zend_string_release(intern->user);
+    if (intern->pass) zend_string_release(intern->pass);
     if (intern->host) zend_string_release(intern->host);
     if (intern->path) zend_string_release(intern->path);
     if (intern->query) zend_string_release(intern->query);
     if (intern->fragment) zend_string_release(intern->fragment);
 
     intern->scheme = NULL;
+    intern->user = NULL;
+    intern->pass = NULL;
     intern->host = NULL;
     intern->path = NULL;
     intern->query = NULL;
@@ -841,12 +884,16 @@ zend_object *signalforge_uri_create_from_string(const char *uri, size_t len)
 
     /* Release defaults */
     if (intern->scheme) zend_string_release(intern->scheme);
+    if (intern->user) zend_string_release(intern->user);
+    if (intern->pass) zend_string_release(intern->pass);
     if (intern->host) zend_string_release(intern->host);
     if (intern->path) zend_string_release(intern->path);
     if (intern->query) zend_string_release(intern->query);
     if (intern->fragment) zend_string_release(intern->fragment);
 
     intern->scheme = NULL;
+    intern->user = NULL;
+    intern->pass = NULL;
     intern->host = NULL;
     intern->path = NULL;
     intern->query = NULL;

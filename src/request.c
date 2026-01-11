@@ -906,6 +906,13 @@ PHP_METHOD(Signalforge_Http_Request, create)
     intern->request_uri = Z_STRVAL(intern->zv_uri);
     intern->request_uri_len = Z_STRLEN(intern->zv_uri);
 
+    /* Free smart_str buffer if it was used for Uri object conversion */
+    if (Z_TYPE_P(uri_param) == IS_OBJECT && instanceof_function(Z_OBJCE_P(uri_param), signalforge_uri_ce)) {
+        smart_str buf_to_free = {0};
+        buf_to_free.s = (zend_string *)uri_str;
+        smart_str_free(&buf_to_free);
+    }
+
     /* Set query string if present in URI */
     const char *query_pos = strchr(Z_STRVAL(intern->zv_uri), '?');
     if (query_pos) {
