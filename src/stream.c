@@ -992,10 +992,41 @@ PHP_METHOD(Signalforge_Http_Stream, fromResource)
     }
     intern->seekable = is_seekable;
     
-    /* Determine capabilities lazily to avoid notices during construction */
-    /* Defer to isReadable() and isWritable() methods for accurate detection */
+    /* Determine capabilities from stream mode.
+     * WHY: We query stream_get_meta_data() to get the mode string, then parse
+     * it to determine read/write capabilities. This is the only reliable way
+     * to detect capabilities since the mode is specified when opening the stream.
+     */
     intern->readable = 1; /* Assume readable by default */
-    intern->writable = 0; /* Will be determined lazily by isWritable() method */
+    intern->writable = 0; /* Default to not writable, will be detected below */
+
+    /* Get mode from stream metadata to determine writable capability */
+    {
+        zval function_name, retval, params[1];
+        ZVAL_STRING(&function_name, "stream_get_meta_data");
+        ZVAL_COPY(&params[0], &intern->zv_resource);
+
+        if (call_user_function(CG(function_table), NULL, &function_name, &retval, 1, params) == SUCCESS
+            && Z_TYPE(retval) == IS_ARRAY) {
+            zval *mode_zv = zend_hash_str_find(Z_ARRVAL(retval), "mode", sizeof("mode")-1);
+            if (mode_zv && Z_TYPE_P(mode_zv) == IS_STRING) {
+                const char *mode_str = Z_STRVAL_P(mode_zv);
+                /* Check if mode allows writing: w, a, x, c, or + modifier */
+                intern->writable = (strchr(mode_str, '+') != NULL ||
+                                   strchr(mode_str, 'w') != NULL ||
+                                   strchr(mode_str, 'a') != NULL ||
+                                   strchr(mode_str, 'x') != NULL ||
+                                   strchr(mode_str, 'c') != NULL) ? 1 : 0;
+                /* Check if mode allows reading: r, or + modifier */
+                intern->readable = (strchr(mode_str, 'r') != NULL ||
+                                   strchr(mode_str, '+') != NULL) ? 1 : 0;
+            }
+        }
+
+        zval_ptr_dtor(&retval);
+        zval_ptr_dtor(&function_name);
+        zval_ptr_dtor(&params[0]);
+    }
 }
 /* }}} */
 
@@ -1016,31 +1047,34 @@ PHP_METHOD(Signalforge_Http_Stream, fromFile)
 {
     zend_string *path;
     zend_string *mode = NULL;
+    zend_bool mode_allocated = 0;
     signalforge_stream_object *intern;
     php_stream *stream;
     zval resource_zv;
-    
+
     ZEND_PARSE_PARAMETERS_START(1, 2)
         Z_PARAM_STR(path)
         Z_PARAM_OPTIONAL
         Z_PARAM_STR(mode)
     ZEND_PARSE_PARAMETERS_END();
-    
+
+    /* If no mode provided, default to "r" */
     if (!mode) {
         mode = zend_string_init("r", 1, 0);
+        mode_allocated = 1;
     }
-    
+
     /* Open file stream */
     stream = php_stream_open_wrapper(ZSTR_VAL(path), ZSTR_VAL(mode), 0, NULL);
     if (!stream) {
-        if (!mode || ZSTR_VAL(mode)[0] != 'r') {
+        if (mode_allocated) {
             zend_string_release(mode);
         }
         zend_throw_exception(spl_ce_RuntimeException,
             "Failed to open file", 0);
         RETURN_THROWS();
     }
-    
+
     /* Create resource from stream */
     php_stream_to_zval(stream, &resource_zv);
 
@@ -1051,17 +1085,23 @@ PHP_METHOD(Signalforge_Http_Stream, fromFile)
     /* Store resource */
     ZVAL_COPY(&intern->zv_resource, &resource_zv);
 
-    /* Determine capabilities based on file mode */
-    if (mode && ZSTR_LEN(mode) > 0) {
+    /* Determine capabilities based on file mode.
+     * WHY: Parse the mode string to determine read/write capabilities.
+     * For reading: modes containing 'r' or '+' allow reading.
+     * For writing: modes containing 'w', 'a', 'x', 'c', or '+' allow writing.
+     */
+    {
         const char *mode_str = ZSTR_VAL(mode);
-        /* Check if mode allows writing (+, w, a, etc.) */
+        /* Check if mode allows writing (+, w, a, x, c) */
         intern->writable = (strchr(mode_str, '+') != NULL ||
                            strchr(mode_str, 'w') != NULL ||
-                           strchr(mode_str, 'a') != NULL) ? 1 : 0;
-    } else {
-        intern->writable = 0; /* Default to not writable */
+                           strchr(mode_str, 'a') != NULL ||
+                           strchr(mode_str, 'x') != NULL ||
+                           strchr(mode_str, 'c') != NULL) ? 1 : 0;
+        /* Check if mode allows reading (r or +) */
+        intern->readable = (strchr(mode_str, 'r') != NULL ||
+                           strchr(mode_str, '+') != NULL) ? 1 : 0;
     }
-    intern->readable = 1; /* Files are readable by default */
 
     /* Initialize other properties */
     intern->position = php_stream_tell(stream);
@@ -1071,14 +1111,11 @@ PHP_METHOD(Signalforge_Http_Stream, fromFile)
     intern->ht_metadata = NULL;
     intern->metadata_loaded = 0;
 
-    if (!mode || ZSTR_VAL(mode)[0] != 'r') {
+    /* Clean up */
+    if (mode_allocated) {
         zend_string_release(mode);
     }
-    
     zval_ptr_dtor(&resource_zv);
-    zend_throw_exception(spl_ce_RuntimeException,
-        "Failed to create stream from file", 0);
-    RETURN_THROWS();
 }
 /* }}} */
 

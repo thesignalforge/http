@@ -1,0 +1,94 @@
+name: HTTP Tests and Valgrind
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_valgrind:
+        description: 'Run Valgrind memory check'
+        required: false
+        default: 'true'
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: PHP ${{ matrix.php-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php-version: ['8.3', '8.4', '8.5']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: signalforge-http:${{ matrix.php-version }}
+          build-args: |
+            PHP_VERSION=${{ matrix.php-version }}
+          cache-from: type=gha,scope=php-${{ matrix.php-version }}
+          cache-to: type=gha,mode=max,scope=php-${{ matrix.php-version }}
+
+      - name: Run PHPT tests
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/tests:/ext/tests \
+            signalforge-http:${{ matrix.php-version }} \
+            php /opt/run-tests.php -q --show-diff /ext/tests/
+
+      - name: Show extension info
+        run: |
+          docker run --rm signalforge-http:${{ matrix.php-version }} \
+            php --ri signalforge_http
+
+  valgrind:
+    name: Valgrind Memory Check
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch' || inputs.run_valgrind
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Valgrind Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.valgrind
+          push: false
+          load: true
+          tags: signalforge-http:valgrind
+          cache-from: type=gha,scope=valgrind
+          cache-to: type=gha,mode=max,scope=valgrind
+
+      - name: Run Valgrind memory check
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/tests:/ext/tests \
+            -v ${{ github.workspace }}:/output \
+            signalforge-http:valgrind \
+            sh -c 'valgrind --leak-check=full \
+                           --show-leak-kinds=all \
+                           --error-exitcode=1 \
+                           --track-origins=yes \
+                           --log-file=/output/valgrind-output.txt \
+                   php /opt/run-tests.php -q /ext/tests/ && \
+                   cat /output/valgrind-output.txt | grep -E "ERROR SUMMARY|LEAK SUMMARY" -A 5'

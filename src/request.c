@@ -36,6 +36,16 @@ extern PHPAPI zend_class_entry *spl_ce_RuntimeException;
 /* Forward declaration */
 extern zend_class_entry *signalforge_stream_ce;
 
+/* Helper: Convert string to uppercase in-place (PHP 8.4+ compatibility)
+ * php_strtoupper was removed in PHP 8.4, so we implement our own version.
+ */
+static inline void signalforge_strtoupper(char *str, size_t len)
+{
+    for (size_t i = 0; i < len; i++) {
+        str[i] = toupper((unsigned char)str[i]);
+    }
+}
+
 /* ============================================================================
  * OBJECT HANDLERS
  * ============================================================================ */
@@ -335,7 +345,7 @@ void signalforge_resolve_method(signalforge_request_object *intern)
     if (Z_TYPE(intern->zv_method_override_header) == IS_STRING) {
         /* Convert to uppercase for consistency */
         zend_string *method = zend_string_dup(Z_STR(intern->zv_method_override_header), 0);
-        php_strtoupper(ZSTR_VAL(method), ZSTR_LEN(method));
+        signalforge_strtoupper(ZSTR_VAL(method), ZSTR_LEN(method));
         ZVAL_STR(&intern->zv_method, method);
         return;
     }
@@ -343,7 +353,7 @@ void signalforge_resolve_method(signalforge_request_object *intern)
     /* Check _method POST field (stored as refcounted zval) */
     if (Z_TYPE(intern->zv_method_override_post) == IS_STRING) {
         zend_string *method = zend_string_dup(Z_STR(intern->zv_method_override_post), 0);
-        php_strtoupper(ZSTR_VAL(method), ZSTR_LEN(method));
+        signalforge_strtoupper(ZSTR_VAL(method), ZSTR_LEN(method));
         ZVAL_STR(&intern->zv_method, method);
         return;
     }
@@ -353,7 +363,7 @@ void signalforge_resolve_method(signalforge_request_object *intern)
         ZVAL_COPY(&intern->zv_method, &intern->zv_request_method);
         /* Convert to uppercase for consistency */
         if (Z_STRLEN(intern->zv_method) > 0) {
-            php_strtoupper(Z_STRVAL(intern->zv_method), Z_STRLEN(intern->zv_method));
+            signalforge_strtoupper(Z_STRVAL(intern->zv_method), Z_STRLEN(intern->zv_method));
         }
     } else {
         ZVAL_STRING(&intern->zv_method, "GET");
@@ -1285,7 +1295,7 @@ PHP_METHOD(Signalforge_Http_Request, withMethod)
     /* Set method */
     if (!Z_ISUNDEF(dst->zv_method)) zval_ptr_dtor(&dst->zv_method);
     ZVAL_STR(&dst->zv_method, zend_string_copy(method));
-    php_strtoupper(Z_STRVAL(dst->zv_method), Z_STRLEN(dst->zv_method));
+    signalforge_strtoupper(Z_STRVAL(dst->zv_method), Z_STRLEN(dst->zv_method));
     dst->flags |= SF_REQ_FLAG_METHOD_RESOLVED;
 }
 /* }}} */

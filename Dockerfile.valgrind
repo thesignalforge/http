@@ -1,0 +1,34 @@
+# Dockerfile.valgrind - For memory leak detection
+# Build with debug symbols and no optimization for meaningful Valgrind output
+
+ARG PHP_VERSION=8.4
+
+FROM php:${PHP_VERSION}-cli-alpine
+
+# Install build dependencies AND valgrind
+RUN apk add --no-cache \
+    autoconf g++ gcc make pkgconf re2c linux-headers valgrind ${PHPIZE_DEPS}
+
+WORKDIR /build
+
+# Copy extension source
+COPY . /build
+
+# Build the extension with debug symbols (critical for Valgrind)
+RUN phpize \
+    && CFLAGS="-g -O0" ./configure --enable-signalforge_http \
+    && make \
+    && make install \
+    && docker-php-ext-enable signalforge_http
+
+# Get run-tests.php from PHP source
+RUN wget -q -O /opt/run-tests.php https://raw.githubusercontent.com/php/php-src/master/run-tests.php
+
+# Configure PHP for Valgrind
+RUN echo "zend.assertions=1" >> /usr/local/etc/php/conf.d/valgrind.ini
+
+# Verify extension is loaded
+RUN php -m | grep signalforge_http
+
+WORKDIR /ext
+CMD ["php", "-v"]
