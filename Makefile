@@ -14,7 +14,7 @@ help:
 	@echo "  make docker-shell     - Interactive shell in Docker"
 	@echo "  make docker-clean     - Remove Docker images"
 	@echo "  make ci-test-all      - Build and test PHP 8.3, 8.4, and 8.5"
-	@echo "  make test-version     - Run tests using ghcr.io image (VERSION=85)"
+	@echo "  make test-version     - Run tests using locally built extension (VERSION=85)"
 	@echo "  make valgrind-docker  - Run Valgrind memory check in Docker"
 	@echo "  make valgrind-test    - Run tests with local Valgrind"
 	@echo ""
@@ -22,7 +22,7 @@ help:
 	@echo "Example: make docker-build VERSION=84"
 
 docker-build:
-	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE_NAME):$(VERSION) -t $(IMAGE_NAME):latest .
+	docker build --platform linux/amd64 --build-arg VERSION=$(VERSION) -t $(IMAGE_NAME):$(VERSION) -t $(IMAGE_NAME):latest .
 
 docker-test:
 	docker run --rm -v $(PWD)/tests:/ext/tests $(IMAGE_NAME):$(VERSION) php /opt/run-tests.php /ext/tests/
@@ -55,15 +55,15 @@ valgrind-test:
 # CI: Build and test all PHP versions
 ci-test-all:
 	@echo "Building and testing PHP 8.3..."
-	docker build --build-arg VERSION=83 -t $(IMAGE_NAME):83 .
+	docker build --platform linux/amd64 --build-arg VERSION=83 -t $(IMAGE_NAME):83 .
 	docker run --rm -v $(PWD)/tests:/ext/tests $(IMAGE_NAME):83 php /opt/run-tests.php -q /ext/tests/
 	@echo ""
 	@echo "Building and testing PHP 8.4..."
-	docker build --build-arg VERSION=84 -t $(IMAGE_NAME):84 .
+	docker build --platform linux/amd64 --build-arg VERSION=84 -t $(IMAGE_NAME):84 .
 	docker run --rm -v $(PWD)/tests:/ext/tests $(IMAGE_NAME):84 php /opt/run-tests.php -q /ext/tests/
 	@echo ""
 	@echo "Building and testing PHP 8.5..."
-	docker build --build-arg VERSION=85 -t $(IMAGE_NAME):85 .
+	docker build --platform linux/amd64 --build-arg VERSION=85 -t $(IMAGE_NAME):85 .
 	docker run --rm -v $(PWD)/tests:/ext/tests $(IMAGE_NAME):85 php /opt/run-tests.php -q /ext/tests/
 	@echo ""
 	@echo "All PHP versions tested successfully!"
@@ -71,7 +71,7 @@ ci-test-all:
 # Valgrind: Run memory check in Docker
 valgrind-docker:
 	@echo "Building Valgrind Docker image..."
-	docker build -f Dockerfile.valgrind -t $(IMAGE_NAME):valgrind .
+	docker build --platform linux/amd64 -f Dockerfile.valgrind -t $(IMAGE_NAME):valgrind .
 	@echo ""
 	@echo "Running Valgrind memory check..."
 	docker run --rm -v $(PWD)/tests:/ext/tests -v $(PWD):/output $(IMAGE_NAME):valgrind \
@@ -80,8 +80,8 @@ valgrind-docker:
 		       php /opt/run-tests.php -q /ext/tests/ && \
 		       cat /output/valgrind-output.txt | grep -E "ERROR SUMMARY|LEAK SUMMARY" -A 5'
 
-# Run tests using pre-built ghcr.io image with configurable PHP version
+# Run tests using locally built extension with configurable PHP version
 test-version:
-	@echo "Running tests with PHP 8.$(VERSION) from ghcr.io..."
-	docker run --rm -v $(PWD):/ext ghcr.io/thesignalforge/signalforge:php$(VERSION) \
-		php /usr/local/lib/php/build/run-tests.php /ext/tests/
+	@echo "Running tests with locally built PHP 8.$(VERSION) extension (linux/amd64)..."
+	docker run --rm --platform linux/amd64 -v $(PWD)/tests:/ext/tests $(IMAGE_NAME):$(VERSION) \
+		php /opt/run-tests.php /ext/tests/

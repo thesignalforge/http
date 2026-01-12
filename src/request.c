@@ -835,46 +835,24 @@ PHP_METHOD(Signalforge_Http_Request, create)
     if (Z_TYPE_P(uri_param) == IS_STRING) {
         uri_str = Z_STR_P(uri_param);
     } else if (Z_TYPE_P(uri_param) == IS_OBJECT && instanceof_function(Z_OBJCE_P(uri_param), signalforge_uri_ce)) {
-        /* Uri object - convert to string */
-        signalforge_uri_object *uri_obj = Z_SIGNALFORGE_URI_P(uri_param);
-        smart_str buf = {0};
+        /* Uri object - call __toString() method */
+        zval uri_string_zv;
+        zend_call_method_with_0_params(Z_OBJ_P(uri_param), Z_OBJCE_P(uri_param),
+            NULL, "__tostring", &uri_string_zv);
 
-        if (uri_obj->scheme && ZSTR_LEN(uri_obj->scheme) > 0) {
-            smart_str_append(&buf, uri_obj->scheme);
-            smart_str_appendl(&buf, "://", 3);
-        }
-        if (uri_obj->host && ZSTR_LEN(uri_obj->host) > 0) {
-            if (uri_obj->user && ZSTR_LEN(uri_obj->user) > 0) {
-                smart_str_append(&buf, uri_obj->user);
-                if (uri_obj->pass && ZSTR_LEN(uri_obj->pass) > 0) {
-                    smart_str_appendc(&buf, ':');
-                    smart_str_append(&buf, uri_obj->pass);
-                }
-                smart_str_appendc(&buf, '@');
-            }
-            smart_str_append(&buf, uri_obj->host);
-            if (uri_obj->port != SIGNALFORGE_PORT_UNSET &&
-                !signalforge_is_standard_port(uri_obj->scheme, uri_obj->port)) {
-                smart_str_appendc(&buf, ':');
-                smart_str_append_long(&buf, uri_obj->port);
-            }
-        }
-        if (uri_obj->path && ZSTR_LEN(uri_obj->path) > 0) {
-            smart_str_append(&buf, uri_obj->path);
-        } else if (!uri_obj->host || ZSTR_LEN(uri_obj->host) == 0) {
-            smart_str_appendc(&buf, '/');
-        }
-        if (uri_obj->query && ZSTR_LEN(uri_obj->query) > 0) {
-            smart_str_appendc(&buf, '?');
-            smart_str_append(&buf, uri_obj->query);
-        }
-        if (uri_obj->fragment && ZSTR_LEN(uri_obj->fragment) > 0) {
-            smart_str_appendc(&buf, '#');
-            smart_str_append(&buf, uri_obj->fragment);
+        if (EG(exception)) {
+            RETURN_THROWS();
         }
 
-        smart_str_0(&buf);
-        uri_str = buf.s ? buf.s : zend_empty_string;
+        if (Z_TYPE(uri_string_zv) != IS_STRING) {
+            zval_ptr_dtor(&uri_string_zv);
+            zend_throw_exception(spl_ce_RuntimeException,
+                "Uri::__toString() must return a string", 0);
+            RETURN_THROWS();
+        }
+
+        uri_str = Z_STR(uri_string_zv);
+        /* uri_str now has ownership from __toString() return value */
     } else {
         zend_throw_exception(spl_ce_InvalidArgumentException,
             "URI must be a string or Uri object", 0);
@@ -907,14 +885,8 @@ PHP_METHOD(Signalforge_Http_Request, create)
         /* Borrowed from parameter - must copy */
         ZVAL_STR_COPY(&intern->zv_uri, uri_str);
     } else {
-        /* Created from Uri object */
-        if (uri_str == zend_empty_string) {
-            /* Never transfer ownership of global empty string */
-            ZVAL_EMPTY_STRING(&intern->zv_uri);
-        } else {
-            /* Transfer ownership of heap-allocated string */
-            ZVAL_STR(&intern->zv_uri, uri_str);
-        }
+        /* Uri object - transfer ownership from __toString() return value */
+        ZVAL_STR(&intern->zv_uri, uri_str);
     }
     intern->request_uri = Z_STRVAL(intern->zv_uri);
     intern->request_uri_len = Z_STRLEN(intern->zv_uri);

@@ -71,8 +71,8 @@ RUN ./configure --quiet \
     --enable-bcmath \
     --with-readline
 
-RUN make -j$(nproc) -s
-RUN make install -s
+RUN make -j$(nproc)
+RUN make install
 
 # Create extension config directory
 RUN mkdir -p /usr/local/etc/php/conf.d
