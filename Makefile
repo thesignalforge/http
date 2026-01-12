@@ -1,32 +1,37 @@
 # Signalforge HTTP Extension - Docker-based Build
 IMAGE_NAME = signalforge-http
+VERSION ?= 85
 
-.PHONY: docker-build docker-test docker-example docker-shell docker-clean valgrind-test valgrind-docker ci-test-all help
+.PHONY: docker-build docker-test docker-example docker-shell docker-clean valgrind-test valgrind-docker ci-test-all test-version build-push help
 
 help:
 	@echo "Signalforge HTTP Extension"
 	@echo ""
 	@echo "Usage:"
-	@echo "  make docker-build     - Build Docker image with extension (PHP 8.3)"
-	@echo "  make docker-test      - Run tests in Docker (PHP 8.3)"
+	@echo "  make docker-build     - Build Docker image with extension (default: PHP 8.5, VERSION=85)"
+	@echo "  make docker-test      - Run tests in Docker (default: PHP 8.5, VERSION=85)"
 	@echo "  make docker-example   - Run example in Docker"
 	@echo "  make docker-shell     - Interactive shell in Docker"
 	@echo "  make docker-clean     - Remove Docker images"
 	@echo "  make ci-test-all      - Build and test PHP 8.3, 8.4, and 8.5"
+	@echo "  make test-version     - Run tests using ghcr.io image (VERSION=85)"
 	@echo "  make valgrind-docker  - Run Valgrind memory check in Docker"
 	@echo "  make valgrind-test    - Run tests with local Valgrind"
+	@echo ""
+	@echo "Supported versions: VERSION=83 (PHP 8.3), VERSION=84 (PHP 8.4), VERSION=85 (PHP 8.5)"
+	@echo "Example: make docker-build VERSION=84"
 
 docker-build:
-	docker build -t $(IMAGE_NAME) .
+	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE_NAME):$(VERSION) -t $(IMAGE_NAME):latest .
 
 docker-test:
-	docker run --rm -v $(PWD)/tests:/ext/tests $(IMAGE_NAME) php /opt/run-tests.php /ext/tests/
+	docker run --rm -v $(PWD)/tests:/ext/tests $(IMAGE_NAME):$(VERSION) php /opt/run-tests.php /ext/tests/
 
 docker-example:
-	docker run --rm -v $(PWD)/examples:/ext/examples $(IMAGE_NAME) php /ext/examples/basic.php
+	docker run --rm -v $(PWD)/examples:/ext/examples $(IMAGE_NAME):$(VERSION) php /ext/examples/basic.php
 
 docker-shell:
-	docker run --rm -it -v $(PWD):/ext $(IMAGE_NAME) sh
+	docker run --rm -it -v $(PWD):/ext $(IMAGE_NAME):$(VERSION) sh
 
 docker-clean:
 	docker rmi $(IMAGE_NAME) 2>/dev/null || true
@@ -50,16 +55,16 @@ valgrind-test:
 # CI: Build and test all PHP versions
 ci-test-all:
 	@echo "Building and testing PHP 8.3..."
-	docker build --build-arg PHP_VERSION=8.3 -t $(IMAGE_NAME):8.3 .
-	docker run --rm -v $(PWD)/tests:/ext/tests $(IMAGE_NAME):8.3 php /opt/run-tests.php -q /ext/tests/
+	docker build --build-arg VERSION=83 -t $(IMAGE_NAME):83 .
+	docker run --rm -v $(PWD)/tests:/ext/tests $(IMAGE_NAME):83 php /opt/run-tests.php -q /ext/tests/
 	@echo ""
 	@echo "Building and testing PHP 8.4..."
-	docker build --build-arg PHP_VERSION=8.4 -t $(IMAGE_NAME):8.4 .
-	docker run --rm -v $(PWD)/tests:/ext/tests $(IMAGE_NAME):8.4 php /opt/run-tests.php -q /ext/tests/
+	docker build --build-arg VERSION=84 -t $(IMAGE_NAME):84 .
+	docker run --rm -v $(PWD)/tests:/ext/tests $(IMAGE_NAME):84 php /opt/run-tests.php -q /ext/tests/
 	@echo ""
 	@echo "Building and testing PHP 8.5..."
-	docker build --build-arg PHP_VERSION=8.5 -t $(IMAGE_NAME):8.5 .
-	docker run --rm -v $(PWD)/tests:/ext/tests $(IMAGE_NAME):8.5 php /opt/run-tests.php -q /ext/tests/
+	docker build --build-arg VERSION=85 -t $(IMAGE_NAME):85 .
+	docker run --rm -v $(PWD)/tests:/ext/tests $(IMAGE_NAME):85 php /opt/run-tests.php -q /ext/tests/
 	@echo ""
 	@echo "All PHP versions tested successfully!"
 
@@ -74,3 +79,9 @@ valgrind-docker:
 		       --track-origins=yes --log-file=/output/valgrind-output.txt \
 		       php /opt/run-tests.php -q /ext/tests/ && \
 		       cat /output/valgrind-output.txt | grep -E "ERROR SUMMARY|LEAK SUMMARY" -A 5'
+
+# Run tests using pre-built ghcr.io image with configurable PHP version
+test-version:
+	@echo "Running tests with PHP 8.$(VERSION) from ghcr.io..."
+	docker run --rm -v $(PWD):/ext ghcr.io/thesignalforge/signalforge:php$(VERSION) \
+		php /usr/local/lib/php/build/run-tests.php /ext/tests/

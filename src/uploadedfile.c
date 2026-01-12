@@ -183,28 +183,40 @@ signalforge_uploadedfile_object *signalforge_uploadedfile_from_files_array(zval 
         intern->client_media_type = NULL;
     }
 
-    /* Extract size */
+    /* Extract size (use ZEND_STRTOL for safe string-to-long conversion) */
     size_zv = zend_hash_str_find(Z_ARRVAL_P(file_data), "size", sizeof("size") - 1);
     if (size_zv) {
         if (Z_TYPE_P(size_zv) == IS_LONG) {
             intern->size = Z_LVAL_P(size_zv);
         } else if (Z_TYPE_P(size_zv) == IS_STRING) {
-            intern->size = atol(Z_STRVAL_P(size_zv));
+            char *endptr = NULL;
+            zend_long parsed_size = ZEND_STRTOL(Z_STRVAL_P(size_zv), &endptr, 10);
+            if (endptr != NULL && *endptr == '\0' && parsed_size >= 0) {
+                intern->size = parsed_size;
+            } else {
+                intern->size = 0;
+            }
         }
     } else {
         intern->size = 0;
     }
 
-    /* Extract error */
+    /* Extract error (validate error codes 0-8) */
     error_zv = zend_hash_str_find(Z_ARRVAL_P(file_data), "error", sizeof("error") - 1);
     if (error_zv) {
         if (Z_TYPE_P(error_zv) == IS_LONG) {
             intern->error = Z_LVAL_P(error_zv);
         } else if (Z_TYPE_P(error_zv) == IS_STRING) {
-            intern->error = atol(Z_STRVAL_P(error_zv));
+            char *endptr = NULL;
+            zend_long parsed_error = ZEND_STRTOL(Z_STRVAL_P(error_zv), &endptr, 10);
+            if (endptr != NULL && *endptr == '\0' && parsed_error >= 0 && parsed_error <= 8) {
+                intern->error = parsed_error;
+            } else {
+                intern->error = 4; /* UPLOAD_ERR_NO_FILE */
+            }
         }
     } else {
-        intern->error = 0; /* UPLOAD_ERR_OK = 0 */
+        intern->error = 0; /* UPLOAD_ERR_OK */
     }
 
     return intern;
