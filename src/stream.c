@@ -1145,7 +1145,9 @@ ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_stream_fromString, 0, 1, Signalfo
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_stream_fromResource, 0, 1, Signalforge\\NativeHttp\\Stream, 0)
-    ZEND_ARG_TYPE_INFO(0, resource, IS_RESOURCE, 0)
+    /* PHP 8.4+ does not allow IS_RESOURCE in zend_type - use untyped parameter.
+     * Runtime validation still enforces resource type in fromResource() implementation. */
+    ZEND_ARG_INFO(0, resource)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_stream_fromFile, 0, 1, Signalforge\\NativeHttp\\Stream, 0)
@@ -1197,7 +1199,10 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_stream_close, 0, 0, IS_VOID, 0)
 ZEND_END_ARG_INFO()
 
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_stream_detach, 0, 0, IS_RESOURCE, 1)
+/* PHP 8.4+ does not allow IS_RESOURCE in zend_type.
+ * PSR-7 StreamInterface::detach() returns resource|null, but we cannot express this
+ * in arginfo. Return type validation happens at runtime. */
+ZEND_BEGIN_ARG_INFO_EX(arginfo_stream_detach, 0, 0, 0)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_stream___toString, 0, 0, IS_STRING, 0)

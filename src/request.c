@@ -902,15 +902,16 @@ PHP_METHOD(Signalforge_Http_Request, create)
     ALLOC_HASHTABLE(intern->ht_attributes);
     zend_hash_init(intern->ht_attributes, 8, NULL, ZVAL_PTR_DTOR, 0);
 
-    /* Set the URI */
-    ZVAL_STR_COPY(&intern->zv_uri, uri_str);
+    /* Set the URI - transfer ownership if created, copy if borrowed */
+    if (Z_TYPE_P(uri_param) == IS_STRING) {
+        /* Borrowed from parameter - must copy */
+        ZVAL_STR_COPY(&intern->zv_uri, uri_str);
+    } else {
+        /* Created from Uri object - transfer ownership, no release needed */
+        ZVAL_STR(&intern->zv_uri, uri_str);
+    }
     intern->request_uri = Z_STRVAL(intern->zv_uri);
     intern->request_uri_len = Z_STRLEN(intern->zv_uri);
-
-    /* Release temporary uri_str if it was created from Uri object conversion */
-    if (Z_TYPE_P(uri_param) == IS_OBJECT && instanceof_function(Z_OBJCE_P(uri_param), signalforge_uri_ce)) {
-        zend_string_release(uri_str);
-    }
 
     /* Set query string if present in URI */
     const char *query_pos = strchr(Z_STRVAL(intern->zv_uri), '?');
