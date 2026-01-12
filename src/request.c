@@ -902,13 +902,19 @@ PHP_METHOD(Signalforge_Http_Request, create)
     ALLOC_HASHTABLE(intern->ht_attributes);
     zend_hash_init(intern->ht_attributes, 8, NULL, ZVAL_PTR_DTOR, 0);
 
-    /* Set the URI - transfer ownership if created, copy if borrowed */
+    /* Set the URI - handle ownership correctly */
     if (Z_TYPE_P(uri_param) == IS_STRING) {
         /* Borrowed from parameter - must copy */
         ZVAL_STR_COPY(&intern->zv_uri, uri_str);
     } else {
-        /* Created from Uri object - transfer ownership, no release needed */
-        ZVAL_STR(&intern->zv_uri, uri_str);
+        /* Created from Uri object */
+        if (uri_str == zend_empty_string) {
+            /* Never transfer ownership of global empty string */
+            ZVAL_EMPTY_STRING(&intern->zv_uri);
+        } else {
+            /* Transfer ownership of heap-allocated string */
+            ZVAL_STR(&intern->zv_uri, uri_str);
+        }
     }
     intern->request_uri = Z_STRVAL(intern->zv_uri);
     intern->request_uri_len = Z_STRLEN(intern->zv_uri);
