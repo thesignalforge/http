@@ -298,15 +298,10 @@ PHP_METHOD(Signalforge_Http_Stream, getContents)
             RETURN_EMPTY_STRING();
         }
 
-        /* Optimize: if reading from start, return original string (TRUE zero-copy).
-         * WHY: When stream is at position 0 and entire string is available,
-         * we can return the original buffer directly. This avoids allocation
-         * of a substring copy, providing significant performance improvement
-         * for common "read entire stream" use cases.
-         */
+        /* Zero-copy optimization: return original string (zend_string_copy increments refcount) */
         if (intern->position == 0 && available == ZSTR_LEN(intern->string_data)) {
             intern->position = ZSTR_LEN(intern->string_data);
-            RETURN_STR(intern->string_data);
+            RETURN_STR(zend_string_copy(intern->string_data));
         }
 
         /* Otherwise, create substring */
@@ -495,9 +490,26 @@ PHP_METHOD(Signalforge_Http_Stream, seek)
                 new_position = offset;
                 break;
             case SEEK_CUR:
+                /* Bounds check to prevent integer overflow/underflow */
+                if (offset > 0 && intern->position > ZEND_LONG_MAX - offset) {
+                    zend_throw_exception(spl_ce_RuntimeException,
+                        "Seek position overflow", 0);
+                    RETURN_THROWS();
+                }
+                if (offset < 0 && intern->position < ZEND_LONG_MIN - offset) {
+                    zend_throw_exception(spl_ce_RuntimeException,
+                        "Seek position underflow", 0);
+                    RETURN_THROWS();
+                }
                 new_position = intern->position + offset;
                 break;
             case SEEK_END:
+                /* Bounds check to prevent integer overflow */
+                if (offset > 0 && (zend_long)ZSTR_LEN(intern->string_data) > ZEND_LONG_MAX - offset) {
+                    zend_throw_exception(spl_ce_RuntimeException,
+                        "Seek position overflow", 0);
+                    RETURN_THROWS();
+                }
                 new_position = ZSTR_LEN(intern->string_data) + offset;
                 break;
             default:
@@ -505,14 +517,14 @@ PHP_METHOD(Signalforge_Http_Stream, seek)
                     "Invalid whence value", 0);
                 RETURN_THROWS();
         }
-        
+
         /* Allow seeking beyond end (test expects this behavior) */
         if (new_position < 0) {
             zend_throw_exception(spl_ce_RuntimeException,
                 "Seek position out of range", 0);
             RETURN_THROWS();
         }
-        
+
         intern->position = new_position;
         return;
     }
@@ -849,13 +861,9 @@ PHP_METHOD(Signalforge_Http_Stream, __toString)
         RETURN_EMPTY_STRING();
     }
 
-    /* For string-based streams, return directly (zero-copy).
-     * WHY: RETURN_STR() automatically handles reference counting, so we return
-     * the original string buffer without duplication. This maintains PSR-7
-     * compliance while avoiding expensive string copying operations.
-     */
+    /* String-based stream: return with proper refcount (zend_string_copy) */
     if (intern->string_data) {
-        RETURN_STR(intern->string_data);
+        RETURN_STR(zend_string_copy(intern->string_data));
     }
 
     /* For resource-based streams */
