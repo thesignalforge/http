@@ -891,6 +891,11 @@ PHP_METHOD(Signalforge_Http_Request, create)
     intern->request_uri = Z_STRVAL(intern->zv_uri);
     intern->request_uri_len = Z_STRLEN(intern->zv_uri);
 
+    /* Release temporary uri_str if it was created from Uri object conversion */
+    if (Z_TYPE_P(uri_param) == IS_OBJECT && instanceof_function(Z_OBJCE_P(uri_param), signalforge_uri_ce)) {
+        zend_string_release(uri_str);
+    }
+
     /* Set query string if present in URI */
     const char *query_pos = strchr(Z_STRVAL(intern->zv_uri), '?');
     if (query_pos) {
