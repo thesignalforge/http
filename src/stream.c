@@ -752,10 +752,9 @@ PHP_METHOD(Signalforge_Http_Stream, close)
     
     /* Resource-based stream */
     if (Z_TYPE(intern->zv_resource) == IS_RESOURCE) {
-        php_stream *stream = signalforge_get_php_stream(intern);
-        if (stream) {
-            php_stream_close(stream);
-        }
+        /* Just release the resource - zval_ptr_dtor will trigger php_stream_close internally.
+         * Calling php_stream_close() explicitly causes a double-free because it releases
+         * the resource from PHP's resource list, then zval_ptr_dtor tries to release it again. */
         zval_ptr_dtor(&intern->zv_resource);
         ZVAL_UNDEF(&intern->zv_resource);
     }
