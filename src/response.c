@@ -636,9 +636,14 @@ PHP_METHOD(Signalforge_Http_Response, getHeaderLine)
     } else if (Z_TYPE_P(val) == IS_STRING) {
         smart_str_appendl(&str, Z_STRVAL_P(val), Z_STRLEN_P(val));
     }
-    
+
     smart_str_0(&str);
-    RETURN_STR(str.s);
+    /* Handle edge case where header exists but is empty */
+    if (str.s) {
+        RETURN_STR(str.s);
+    } else {
+        RETURN_EMPTY_STRING();
+    }
 }
 /* }}} */
 
