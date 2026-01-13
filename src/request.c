@@ -831,34 +831,6 @@ PHP_METHOD(Signalforge_Http_Request, create)
         RETURN_THROWS();
     }
 
-    /* Extract URI string from parameter */
-    if (Z_TYPE_P(uri_param) == IS_STRING) {
-        uri_str = Z_STR_P(uri_param);
-    } else if (Z_TYPE_P(uri_param) == IS_OBJECT && instanceof_function(Z_OBJCE_P(uri_param), signalforge_uri_ce)) {
-        /* Uri object - call __toString() method */
-        zval uri_string_zv;
-        zend_call_method_with_0_params(Z_OBJ_P(uri_param), Z_OBJCE_P(uri_param),
-            NULL, "__tostring", &uri_string_zv);
-
-        if (EG(exception)) {
-            RETURN_THROWS();
-        }
-
-        if (Z_TYPE(uri_string_zv) != IS_STRING) {
-            zval_ptr_dtor(&uri_string_zv);
-            zend_throw_exception(spl_ce_RuntimeException,
-                "Uri::__toString() must return a string", 0);
-            RETURN_THROWS();
-        }
-
-        uri_str = Z_STR(uri_string_zv);
-        /* uri_str now has ownership from __toString() return value */
-    } else {
-        zend_throw_exception(spl_ce_InvalidArgumentException,
-            "URI must be a string or Uri object", 0);
-        RETURN_THROWS();
-    }
-
     /* Create new instance */
     object_init_ex(return_value, signalforge_request_ce);
     intern = Z_SIGNALFORGE_REQUEST_P(return_value);
@@ -883,18 +855,34 @@ PHP_METHOD(Signalforge_Http_Request, create)
     /* Set the URI - handle ownership correctly */
     if (Z_TYPE_P(uri_param) == IS_STRING) {
         /* Borrowed from parameter - must copy */
-        ZVAL_STR_COPY(&intern->zv_uri, uri_str);
+        ZVAL_STR_COPY(&intern->zv_uri, Z_STR_P(uri_param));
+    } else if (Z_TYPE_P(uri_param) == IS_OBJECT && instanceof_function(Z_OBJCE_P(uri_param), signalforge_uri_ce)) {
+        /* Uri object - call __toString() and transfer ownership */
+        zval uri_string_zv;
+        zend_call_method_with_0_params(Z_OBJ_P(uri_param), Z_OBJCE_P(uri_param),
+            NULL, "__tostring", &uri_string_zv);
+
+        if (EG(exception)) {
+            RETURN_THROWS();
+        }
+
+        if (Z_TYPE(uri_string_zv) != IS_STRING) {
+            zval_ptr_dtor(&uri_string_zv);
+            zend_throw_exception(spl_ce_RuntimeException,
+                "Uri::__toString() must return a string", 0);
+            RETURN_THROWS();
+        }
+
+        /* Transfer ownership from temporary zval to object */
+        ZVAL_COPY_VALUE(&intern->zv_uri, &uri_string_zv);
+        ZVAL_UNDEF(&uri_string_zv);  /* Mark as transferred, no double-free */
     } else {
-        /* Uri object - transfer ownership from __toString() return value */
-        ZVAL_STR(&intern->zv_uri, uri_str);
+        zend_throw_exception(spl_ce_InvalidArgumentException,
+            "URI must be a string or Uri object", 0);
+        RETURN_THROWS();
     }
     intern->request_uri = Z_STRVAL(intern->zv_uri);
     intern->request_uri_len = Z_STRLEN(intern->zv_uri);
-
-    /* Release temporary uri_str if it was created from Uri object conversion */
-    if (Z_TYPE_P(uri_param) == IS_OBJECT && instanceof_function(Z_OBJCE_P(uri_param), signalforge_uri_ce)) {
-        zend_string_release(uri_str);
-    }
 
     /* Set query string if present in URI */
     const char *query_pos = strchr(Z_STRVAL(intern->zv_uri), '?');
