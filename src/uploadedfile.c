@@ -401,9 +401,8 @@ PHP_METHOD(Signalforge_Http_UploadedFile, getStream)
     ZVAL_COPY(&intern->zv_stream, &stream_zv);
     intern->stream_loaded = 1;
 
-    /* Return the stream */
+    /* Return the stream - RETVAL_ZVAL with dtor=1 already destroys stream_zv */
     RETVAL_ZVAL(&stream_zv, 1, 1);
-    zval_ptr_dtor(&stream_zv);
 
     zval_ptr_dtor(&resource_zv);
     /* Successfully created stream - return it */

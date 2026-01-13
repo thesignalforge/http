@@ -2,18 +2,17 @@
 # Mirrors php-builds approach: compiles PHP from source then builds extension
 #
 # Build args:
-#   VERSION - PHP version (83, 84, 85) - defaults to 85 (PHP 8.5)
+#   PHP_VERSION - PHP version (8.3, 8.4, 8.5) - defaults to 8.5
 #
-ARG VERSION=85
+ARG PHP_VERSION=8.5
 
 FROM ubuntu:24.04
 
-ARG VERSION
+ARG PHP_VERSION
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PHP_VERSION=${VERSION}
 
 LABEL maintainer="Signalforge Team"
-LABEL description="PHP with signalforge_http extension"
+LABEL description="PHP ${PHP_VERSION} with signalforge_http extension"
 LABEL php.version="${PHP_VERSION}"
 
 # Install build dependencies
@@ -45,8 +44,8 @@ RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
 
 # Clone and build PHP from source
 WORKDIR /tmp
-RUN MAJOR=$(echo ${PHP_VERSION} | cut -c1); \
-    MINOR=$(echo ${PHP_VERSION} | cut -c2); \
+RUN MAJOR=$(echo ${PHP_VERSION} | cut -d. -f1); \
+    MINOR=$(echo ${PHP_VERSION} | cut -d. -f2); \
     PHP_BRANCH="PHP-${MAJOR}.${MINOR}"; \
     git clone --depth 1 --branch ${PHP_BRANCH} --quiet https://github.com/php/php-src.git
 
@@ -71,8 +70,8 @@ RUN ./configure --quiet \
     --enable-bcmath \
     --with-readline
 
-RUN make -j$(nproc) -s
-RUN make install -s
+RUN make -j$(nproc)
+RUN make install
 
 # Create extension config directory
 RUN mkdir -p /usr/local/etc/php/conf.d
