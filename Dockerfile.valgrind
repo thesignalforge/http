@@ -51,12 +51,11 @@ RUN MAJOR=$(echo ${PHP_VERSION} | cut -d. -f1); \
 WORKDIR /tmp/php-src
 RUN ./buildconf --force > /dev/null
 
-# Configure PHP with debug symbols for Valgrind
-RUN ./configure --quiet \
+# Configure PHP (same as Dockerfile, debug symbols will come from CFLAGS)
+RUN CFLAGS="-g" ./configure --quiet \
     --prefix=/usr/local \
     --with-config-file-path=/usr/local/etc/php \
     --with-config-file-scan-dir=/usr/local/etc/php/conf.d \
-    --enable-debug \
     --with-curl \
     --with-openssl \
     --with-zip \
@@ -77,7 +76,7 @@ RUN make install
 # Create extension config directory
 RUN mkdir -p /usr/local/etc/php/conf.d
 
-# Copy and build http extension with debug symbols
+# Copy and build http extension with debug symbols (no optimization for accurate valgrind)
 WORKDIR /build
 COPY . /build
 
