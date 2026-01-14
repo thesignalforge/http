@@ -52,12 +52,21 @@ extern zend_class_entry *signalforge_uri_ce;
 /* ============================================================================
  * Module Globals
  *
- * Per-request storage for interned strings. Automatically thread-safe
- * in ZTS builds, regular globals in non-ZTS builds.
+ * Per-request storage for streamforge integration and cleanup tracking.
+ * Automatically thread-safe in ZTS builds, regular globals in non-ZTS builds.
  * ============================================================================ */
 
+/* Maximum streamforge uploads to track for cleanup */
+#define SIGNALFORGE_MAX_STREAMFORGE_UPLOADS 64
+
 ZEND_BEGIN_MODULE_GLOBALS(signalforge_http)
-    int dummy; /* Keep at least one global for TSRM */
+    /* Streamforge integration */
+    zend_bool streamforge_detected;     /* True if HTTP_X_STREAMFORGE=1 present */
+    int streamforge_upload_count;       /* Number of uploads from streamforge */
+
+    /* Temp file paths that need cleanup on RSHUTDOWN if not moved */
+    char *streamforge_temp_paths[SIGNALFORGE_MAX_STREAMFORGE_UPLOADS];
+    zend_bool streamforge_temp_moved[SIGNALFORGE_MAX_STREAMFORGE_UPLOADS];
 ZEND_END_MODULE_GLOBALS(signalforge_http)
 
 ZEND_EXTERN_MODULE_GLOBALS(signalforge_http)

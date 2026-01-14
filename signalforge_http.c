@@ -16,6 +16,7 @@
 
 #include "php_signalforge_http.h"
 #include "src/psr7_interfaces.h"
+#include <unistd.h>  /* For unlink() */
 #include "src/request.h"
 #include "src/response.h"
 #include "src/stream.h"
@@ -46,6 +47,8 @@ PHP_MINFO_FUNCTION(signalforge_http)
         "disabled"
 #endif
     );
+    php_info_print_table_row(2, "Streamforge Integration", "enabled");
+    php_info_print_table_row(2, "Max Streamforge Uploads", ZEND_TOSTR(SIGNALFORGE_MAX_STREAMFORGE_UPLOADS));
     php_info_print_table_end();
 }
 
@@ -82,6 +85,16 @@ PHP_RINIT_FUNCTION(signalforge_http)
     ZEND_TSRMLS_CACHE_UPDATE();
 #endif
 
+    /* Initialize streamforge state for this request */
+    SIGNALFORGE_HTTP_G(streamforge_detected) = 0;
+    SIGNALFORGE_HTTP_G(streamforge_upload_count) = 0;
+
+    /* Clear temp path tracking arrays */
+    for (int i = 0; i < SIGNALFORGE_MAX_STREAMFORGE_UPLOADS; i++) {
+        SIGNALFORGE_HTTP_G(streamforge_temp_paths)[i] = NULL;
+        SIGNALFORGE_HTTP_G(streamforge_temp_moved)[i] = 0;
+    }
+
     return SUCCESS;
 }
 
@@ -91,7 +104,32 @@ PHP_RSHUTDOWN_FUNCTION(signalforge_http)
     ZEND_TSRMLS_CACHE_UPDATE();
 #endif
 
-    /* No per-request cleanup needed - all resources freed via free_obj handlers */
+    /*
+     * Clean up streamforge temp files that weren't moved.
+     *
+     * When streamforge handles uploads, it writes files to temp paths. If the
+     * PHP application doesn't call moveTo() on an uploaded file, we need to
+     * delete the temp file to prevent disk space leaks.
+     *
+     * Files that were moved have streamforge_temp_moved[i] = 1.
+     */
+    for (int i = 0; i < SIGNALFORGE_HTTP_G(streamforge_upload_count); i++) {
+        if (SIGNALFORGE_HTTP_G(streamforge_temp_paths)[i] != NULL) {
+            /* Delete if not moved */
+            if (!SIGNALFORGE_HTTP_G(streamforge_temp_moved)[i]) {
+                unlink(SIGNALFORGE_HTTP_G(streamforge_temp_paths)[i]);
+            }
+
+            /* Free the path string */
+            efree(SIGNALFORGE_HTTP_G(streamforge_temp_paths)[i]);
+            SIGNALFORGE_HTTP_G(streamforge_temp_paths)[i] = NULL;
+        }
+    }
+
+    /* Reset state */
+    SIGNALFORGE_HTTP_G(streamforge_detected) = 0;
+    SIGNALFORGE_HTTP_G(streamforge_upload_count) = 0;
+
     return SUCCESS;
 }
 

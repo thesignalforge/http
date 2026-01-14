@@ -37,6 +37,115 @@ HTTP request/response handling is invoked on nearly every request, often hundred
 - **Immutable Objects**: All `with*()` methods return new instances
 - **Memory Efficient**: Proper reference counting and cleanup
 
+## Streamforge Proxy Integration
+
+The extension integrates seamlessly with the [Streamforge](../streamforge) FastCGI proxy for high-performance file upload handling. When Streamforge is deployed between nginx and php-fpm, it offloads file upload I/O from PHP workers, dramatically improving throughput for upload-heavy applications.
+
+### How It Works
+
+```
+WITHOUT STREAMFORGE:
+┌────────┐     ┌─────────┐     ┌───────────┐
+│ nginx  │────▶│ php-fpm │────▶│  $_FILES  │
+└────────┘     └─────────┘     └───────────┘
+                    │
+            Worker blocked during
+            entire upload duration
+
+WITH STREAMFORGE:
+┌────────┐     ┌─────────────┐     ┌─────────┐     ┌─────────────────────┐
+│ nginx  │────▶│ streamforge │────▶│ php-fpm │────▶│ HTTP_X_UPLOAD_* hdrs│
+└────────┘     └─────────────┘     └─────────┘     └─────────────────────┘
+                     │
+              Files written to disk
+              before PHP starts
+```
+
+### Benefits
+
+| Scenario | Standard PHP | With Streamforge |
+|----------|--------------|------------------|
+| 500MB upload over slow connection | Worker blocked ~30s | Worker engaged ~5ms |
+| Memory per upload | Up to 500MB buffered | ~100KB proxy buffers |
+| 20 concurrent uploads, 10 workers | Site unresponsive | No impact on other requests |
+
+### Transparent Integration
+
+The extension automatically detects Streamforge and reads uploads from the appropriate source. **Your application code remains unchanged**:
+
+```php
+// Works identically with or without Streamforge
+$request = Request::capture();
+$files = $request->getUploadedFiles();
+
+foreach ($files as $name => $file) {
+    $file->getClientFilename();  // "document.pdf"
+    $file->getSize();            // 52428800
+    $file->moveTo('/storage/docs/document.pdf');
+}
+```
+
+### Detection API
+
+Check if Streamforge is handling the current request:
+
+```php
+use Signalforge\NativeHttp\Request;
+
+// Static method
+if (Request::isStreamforgeEnabled()) {
+    // Streamforge is proxying this request
+}
+
+// Or check $_SERVER directly
+if (isset($_SERVER['HTTP_X_STREAMFORGE'])) {
+    // Streamforge marker present
+}
+
+// Check for processed uploads
+if (isset($_SERVER['HTTP_X_UPLOAD_FILE_COUNT'])) {
+    $count = (int) $_SERVER['HTTP_X_UPLOAD_FILE_COUNT'];
+    // Streamforge handled $count file uploads
+}
+```
+
+### Protocol
+
+When Streamforge handles multipart uploads, it:
+
+1. Parses the multipart body and writes files to disk
+2. Adds metadata headers to the FastCGI request:
+   - `HTTP_X_STREAMFORGE=1` - Proxy marker
+   - `HTTP_X_UPLOAD_FILE_COUNT=N` - Number of uploaded files
+   - `HTTP_X_UPLOAD_0_NAME` - Form field name
+   - `HTTP_X_UPLOAD_0_FILENAME` - Original client filename
+   - `HTTP_X_UPLOAD_0_PATH` - Temp file path on disk
+   - `HTTP_X_UPLOAD_0_SIZE` - File size in bytes
+   - `HTTP_X_UPLOAD_0_TYPE` - MIME type
+3. Sends only form fields (not file content) to PHP-FPM
+
+The extension reads these headers and creates `UploadedFile` objects that work identically to standard PHP uploads.
+
+### Cleanup
+
+Temp files are automatically cleaned up:
+- **On `moveTo()`**: File is moved, no cleanup needed
+- **On request end**: Unmoved temp files are deleted by the extension's RSHUTDOWN handler
+
+This prevents disk space leaks even if application code doesn't handle all uploaded files.
+
+### Deployment
+
+See the [Streamforge documentation](../streamforge/README.md) for deployment instructions. Basic setup:
+
+```bash
+# Start Streamforge between nginx and php-fpm
+streamforge -l 0.0.0.0:9001 -u /var/run/php-fpm.sock -d /tmp/uploads
+
+# Configure nginx to send requests to Streamforge
+# fastcgi_pass 127.0.0.1:9001;
+```
+
 ## Requirements
 
 - PHP 8.3, 8.4, or 8.5
