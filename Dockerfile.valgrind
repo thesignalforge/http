@@ -111,8 +111,8 @@ RUN echo "zend.assertions=1" >> /usr/local/etc/php/conf.d/debug.ini
 ENV ASAN_OPTIONS="detect_leaks=1:abort_on_error=1:print_stats=1:check_initialization_order=1"
 ENV UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1"
 
-# Get run-tests.php from PHP source
-RUN wget -q -O /opt/run-tests.php https://raw.githubusercontent.com/php/php-src/master/run-tests.php
+# Enable extension
+RUN echo "extension=signalforge_http.so" > /usr/local/etc/php/conf.d/signalforge_http.ini
 
 # Verify extension is loaded (may show ASan output, that's OK)
 RUN php -m | grep signalforge_http || echo "Extension check - ASan may report issues above"
