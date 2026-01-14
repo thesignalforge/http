@@ -1,13 +1,6 @@
-# Dockerfile.valgrind - For memory error detection
-# Build with debug symbols and AddressSanitizer for catching memory bugs
+# Dockerfile.valgrind - For memory leak detection
+# Build with debug symbols and no optimization for meaningful Valgrind output
 # Mirrors CI environment: Ubuntu 24.04 + PHP built from source
-#
-# Usage:
-#   docker build -f Dockerfile.valgrind -t signalforge-asan .
-#   docker run --rm -v $(pwd):/app -w /app signalforge-asan php test.php
-#
-# For valgrind (slower but different coverage):
-#   docker run --rm -v $(pwd):/app -w /app signalforge-asan valgrind php test.php
 
 ARG PHP_VERSION=8.5
 
@@ -17,10 +10,10 @@ ARG PHP_VERSION
 ENV DEBIAN_FRONTEND=noninteractive
 
 LABEL maintainer="Signalforge Team"
-LABEL description="PHP ${PHP_VERSION} with signalforge_http extension (Debug + ASan + Valgrind)"
+LABEL description="PHP ${PHP_VERSION} with signalforge_http extension (Debug + Valgrind)"
 LABEL php.version="${PHP_VERSION}"
 
-# Install build dependencies, valgrind, and ASan runtime
+# Install build dependencies AND valgrind
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
     git \
     gcc \
@@ -34,8 +27,6 @@ RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
     bison \
     wget \
     valgrind \
-    libasan8 \
-    libubsan1 \
     libxml2-dev \
     libssl-dev \
     libcurl4-openssl-dev \
@@ -50,7 +41,7 @@ RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Clone and build PHP from source with ASan
+# Clone and build PHP from source (with debug symbols)
 WORKDIR /tmp
 RUN MAJOR=$(echo ${PHP_VERSION} | cut -d. -f1); \
     MINOR=$(echo ${PHP_VERSION} | cut -d. -f2); \
@@ -60,13 +51,8 @@ RUN MAJOR=$(echo ${PHP_VERSION} | cut -d. -f1); \
 WORKDIR /tmp/php-src
 RUN ./buildconf --force > /dev/null
 
-# Build PHP with AddressSanitizer and UndefinedBehaviorSanitizer
-# Using -O2 to match production GHCR build optimization level
-ENV CFLAGS="-g -O2 -fsanitize=address,undefined -fno-omit-frame-pointer"
-ENV CXXFLAGS="-g -O2 -fsanitize=address,undefined -fno-omit-frame-pointer"
-ENV LDFLAGS="-fsanitize=address,undefined"
-
-RUN ./configure --quiet \
+# Configure PHP (same as Dockerfile, debug symbols will come from CFLAGS)
+RUN CFLAGS="-g" ./configure --quiet \
     --prefix=/usr/local \
     --with-config-file-path=/usr/local/etc/php \
     --with-config-file-scan-dir=/usr/local/etc/php/conf.d \
@@ -90,32 +76,26 @@ RUN make install
 # Create extension config directory
 RUN mkdir -p /usr/local/etc/php/conf.d
 
-# Copy and build http extension with ASan
+# Copy and build http extension with debug symbols (no optimization for accurate valgrind)
 WORKDIR /build
 COPY . /build
 
 RUN /usr/local/bin/phpize \
-    && CFLAGS="-g -O2 -fsanitize=address,undefined -fno-omit-frame-pointer" \
-       LDFLAGS="-fsanitize=address,undefined" \
-       ./configure --enable-signalforge_http \
+    && CFLAGS="-g -O0" ./configure --enable-signalforge_http \
     && make -j$(nproc) \
     && make install
 
 # Enable extension
 RUN echo "extension=signalforge_http.so" > /usr/local/etc/php/conf.d/signalforge_http.ini
 
-# Configure PHP for debugging
-RUN echo "zend.assertions=1" >> /usr/local/etc/php/conf.d/debug.ini
+# Configure PHP for Valgrind
+RUN echo "zend.assertions=1" >> /usr/local/etc/php/conf.d/valgrind.ini
 
-# ASan environment variables for better error reporting
-ENV ASAN_OPTIONS="detect_leaks=1:abort_on_error=1:print_stats=1:check_initialization_order=1"
-ENV UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1"
+# Get run-tests.php from PHP source
+RUN wget -q -O /opt/run-tests.php https://raw.githubusercontent.com/php/php-src/master/run-tests.php
 
-# Enable extension
-RUN echo "extension=signalforge_http.so" > /usr/local/etc/php/conf.d/signalforge_http.ini
-
-# Verify extension is loaded (may show ASan output, that's OK)
-RUN php -m | grep signalforge_http || echo "Extension check - ASan may report issues above"
+# Verify extension is loaded
+RUN php -m | grep signalforge_http
 
 WORKDIR /ext
 CMD ["php", "-v"]
