@@ -530,7 +530,9 @@ PHP_METHOD(Signalforge_Http_Response, getHeaders)
                     Z_TRY_ADDREF_P(val);
                     add_next_index_zval(&header_array, val);
                 }
-                zend_hash_add(Z_ARRVAL_P(return_value), key, &header_array);
+                /* Use add_assoc_zval_ex to create fresh key rather than reusing source key.
+                 * This avoids reference counting issues when source HashTable is destroyed. */
+                add_assoc_zval_ex(return_value, ZSTR_VAL(key), ZSTR_LEN(key), &header_array);
             }
         } ZEND_HASH_FOREACH_END();
     } else {
