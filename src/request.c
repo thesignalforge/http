@@ -124,7 +124,7 @@ static void signalforge_request_free_object(zend_object *object)
     if (!Z_ISUNDEF(intern->zv_method_override_post)) zval_ptr_dtor(&intern->zv_method_override_post);
     if (!Z_ISUNDEF(intern->zv_uri)) zval_ptr_dtor(&intern->zv_uri);
     if (!Z_ISUNDEF(intern->zv_query_string)) zval_ptr_dtor(&intern->zv_query_string);
-    
+
     /* Free owned HashTables */
     if (intern->ht_headers) {
         zend_hash_destroy(intern->ht_headers);
@@ -977,7 +977,7 @@ PHP_METHOD(Signalforge_Http_Request, getHeaders)
 {
     signalforge_request_object *intern = Z_SIGNALFORGE_REQUEST_P(ZEND_THIS);
     ZEND_PARSE_PARAMETERS_NONE();
-    
+
     if (intern->ht_headers) {
         /* Convert HashTable to array, ensuring values are arrays */
         array_init(return_value);
@@ -993,7 +993,9 @@ PHP_METHOD(Signalforge_Http_Request, getHeaders)
                     Z_TRY_ADDREF_P(val);
                     add_next_index_zval(&header_array, val);
                 }
-                zend_hash_add(Z_ARRVAL_P(return_value), key, &header_array);
+                /* Use add_assoc_zval_ex to create fresh key rather than reusing source key.
+                 * This avoids reference counting issues when source HashTable is destroyed. */
+                add_assoc_zval_ex(return_value, ZSTR_VAL(key), ZSTR_LEN(key), &header_array);
             }
         } ZEND_HASH_FOREACH_END();
     } else {
