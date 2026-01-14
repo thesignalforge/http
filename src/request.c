@@ -778,6 +778,52 @@ PHP_METHOD(Signalforge_Http_Request, capture)
 }
 /* }}} */
 
+/* {{{ proto bool Request::isStreamforgeEnabled()
+ * Check if the current request is being proxied through streamforge.
+ *
+ * When streamforge is handling requests, it adds HTTP_X_STREAMFORGE=1 to
+ * the server params. This method provides a convenient way to check for
+ * streamforge presence without manually inspecting $_SERVER.
+ *
+ * Use cases:
+ * - Conditional logic based on proxy presence
+ * - Debugging/logging
+ * - Performance optimization paths
+ *
+ * @return bool True if streamforge proxy is detected
+ */
+PHP_METHOD(Signalforge_Http_Request, isStreamforgeEnabled)
+{
+    zval *server_zv;
+
+    ZEND_PARSE_PARAMETERS_NONE();
+
+    /* Check global detection flag first (set during getUploadedFiles) */
+    if (SIGNALFORGE_HTTP_G(streamforge_detected)) {
+        RETURN_TRUE;
+    }
+
+    /* Check $_SERVER for HTTP_X_STREAMFORGE header */
+    server_zv = signalforge_get_superglobal("_SERVER", sizeof("_SERVER") - 1);
+    if (server_zv && Z_TYPE_P(server_zv) == IS_ARRAY) {
+        zval *marker = zend_hash_str_find(Z_ARRVAL_P(server_zv),
+            "HTTP_X_STREAMFORGE", sizeof("HTTP_X_STREAMFORGE") - 1);
+        if (marker) {
+            RETURN_TRUE;
+        }
+
+        /* Also check for upload file count (indicates streamforge handled uploads) */
+        zval *file_count = zend_hash_str_find(Z_ARRVAL_P(server_zv),
+            "HTTP_X_UPLOAD_FILE_COUNT", sizeof("HTTP_X_UPLOAD_FILE_COUNT") - 1);
+        if (file_count) {
+            RETURN_TRUE;
+        }
+    }
+
+    RETURN_FALSE;
+}
+/* }}} */
+
 /* {{{ proto Request Request::create(string $method, mixed $uri, array $serverParams = [])
  * Creates a new Request instance with the specified method and URI.
  * This is the PSR-17 factory method for creating Request instances programmatically.
@@ -1855,6 +1901,61 @@ PHP_METHOD(Signalforge_Http_Request, getUploadedFiles)
 
     array_init(return_value);
 
+    /*
+     * Check for streamforge proxy uploads first.
+     *
+     * When streamforge handles multipart uploads, it writes files to disk
+     * and passes metadata via HTTP_X_UPLOAD_* headers. $_FILES will be empty
+     * because streamforge already consumed the multipart body.
+     */
+    if (Z_TYPE(intern->zv_server) == IS_ARRAY) {
+        zval *file_count_zv = zend_hash_str_find(Z_ARRVAL(intern->zv_server),
+            "HTTP_X_UPLOAD_FILE_COUNT", sizeof("HTTP_X_UPLOAD_FILE_COUNT") - 1);
+
+        if (file_count_zv) {
+            /* Streamforge mode - read uploads from HTTP_X_UPLOAD_* headers */
+            int count = 0;
+
+            if (Z_TYPE_P(file_count_zv) == IS_LONG) {
+                count = (int)Z_LVAL_P(file_count_zv);
+            } else if (Z_TYPE_P(file_count_zv) == IS_STRING) {
+                count = atoi(Z_STRVAL_P(file_count_zv));
+            }
+
+            /* Mark streamforge as detected in globals */
+            SIGNALFORGE_HTTP_G(streamforge_detected) = 1;
+
+            for (int i = 0; i < count && i < SIGNALFORGE_MAX_STREAMFORGE_UPLOADS; i++) {
+                char name_key[64];
+                zval uploaded_file_zv;
+                zval *field_name_zv;
+
+                /* Get the form field name for this upload */
+                snprintf(name_key, sizeof(name_key), "HTTP_X_UPLOAD_%d_NAME", i);
+                field_name_zv = zend_hash_str_find(Z_ARRVAL(intern->zv_server),
+                    name_key, strlen(name_key));
+
+                /* Create UploadedFile from streamforge metadata */
+                signalforge_uploadedfile_from_streamforge(
+                    Z_ARRVAL(intern->zv_server), i, &uploaded_file_zv);
+
+                /* Add to result array using field name as key */
+                if (field_name_zv && Z_TYPE_P(field_name_zv) == IS_STRING) {
+                    zend_hash_str_update(Z_ARRVAL_P(return_value),
+                        Z_STRVAL_P(field_name_zv), Z_STRLEN_P(field_name_zv),
+                        &uploaded_file_zv);
+                } else {
+                    /* Fallback: use numeric index if no field name */
+                    zend_hash_index_update(Z_ARRVAL_P(return_value), i, &uploaded_file_zv);
+                }
+            }
+
+            /* Return early - streamforge uploads are already handled */
+            return;
+        }
+    }
+
+    /* Standard mode - read uploads from $_FILES */
     if (Z_TYPE(intern->zv_files) == IS_ARRAY) {
         /* Convert $_FILES array entries to UploadedFile objects */
         ZEND_HASH_FOREACH_STR_KEY_VAL(Z_ARRVAL(intern->zv_files), key, val) {
@@ -2071,6 +2172,9 @@ ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_request_create, 0, 2, Signalforge
     ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, serverParams, IS_ARRAY, 1, "[]")
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_request_isStreamforgeEnabled, 0, 0, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_request_getProtocolVersion, 0, 0, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
@@ -2191,6 +2295,7 @@ ZEND_END_ARG_INFO()
 static const zend_function_entry signalforge_request_methods[] = {
     PHP_ME(Signalforge_Http_Request, capture, arginfo_request_capture, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
     PHP_ME(Signalforge_Http_Request, create, arginfo_request_create, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(Signalforge_Http_Request, isStreamforgeEnabled, arginfo_request_isStreamforgeEnabled, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 
     /* MessageInterface */
     PHP_ME(Signalforge_Http_Request, getProtocolVersion, arginfo_request_getProtocolVersion, ZEND_ACC_PUBLIC)

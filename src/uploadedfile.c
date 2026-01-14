@@ -54,6 +54,10 @@ static zend_object *signalforge_uploadedfile_create_object(zend_class_entry *ce)
     intern->error = 0;
     intern->stream_loaded = 0;
 
+    /* Initialize streamforge state */
+    intern->from_streamforge = 0;
+    intern->streamforge_index = -1;
+
     /* Set up Zend object infrastructure */
     zend_object_std_init(&intern->std, ce);
     object_properties_init(&intern->std, ce);
@@ -488,6 +492,9 @@ PHP_METHOD(Signalforge_Http_UploadedFile, moveTo)
         RETURN_THROWS();
     }
 
+    /* Mark streamforge temp file as moved (prevents RSHUTDOWN cleanup) */
+    signalforge_uploadedfile_mark_moved(intern);
+
     /* Update tmp_name to new location */
     if (intern->tmp_name) {
         zend_string_release(intern->tmp_name);
@@ -635,5 +642,114 @@ void signalforge_uploadedfile_register_class(void)
     /* Set custom object creation function */
     signalforge_uploadedfile_ce->create_object = signalforge_uploadedfile_create_object;
 
+}
+
+/* ============================================================================
+ * STREAMFORGE INTEGRATION
+ *
+ * When the streamforge proxy handles multipart uploads, it writes files to disk
+ * and passes metadata via HTTP_X_UPLOAD_* headers instead of populating $_FILES.
+ * These functions create UploadedFile objects from that metadata.
+ * ============================================================================ */
+
+/**
+ * Create UploadedFile from streamforge HTTP_X_UPLOAD_* headers
+ *
+ * Streamforge sends these headers for each uploaded file:
+ *   HTTP_X_UPLOAD_N_NAME      - Form field name
+ *   HTTP_X_UPLOAD_N_FILENAME  - Original client filename
+ *   HTTP_X_UPLOAD_N_PATH      - Temp file path on disk
+ *   HTTP_X_UPLOAD_N_SIZE      - File size in bytes
+ *   HTTP_X_UPLOAD_N_TYPE      - MIME type (optional)
+ *
+ * @param server_ht  $_SERVER hashtable
+ * @param index      Upload index (0, 1, 2, ...)
+ * @param return_value  zval to initialize with UploadedFile object
+ * @return Internal object pointer, or NULL on error
+ */
+signalforge_uploadedfile_object *signalforge_uploadedfile_from_streamforge(
+    HashTable *server_ht, int index, zval *return_value)
+{
+    signalforge_uploadedfile_object *intern;
+    char key[64];
+    zval *val;
+
+    /* Create new instance */
+    object_init_ex(return_value, signalforge_uploadedfile_ce);
+    intern = Z_SIGNALFORGE_UPLOADEDFILE_P(return_value);
+
+    /* Mark as from streamforge */
+    intern->from_streamforge = 1;
+    intern->error = 0; /* UPLOAD_ERR_OK - streamforge already validated */
+
+    /* Get temp file path (required) */
+    snprintf(key, sizeof(key), "HTTP_X_UPLOAD_%d_PATH", index);
+    val = zend_hash_str_find(server_ht, key, strlen(key));
+    if (val && Z_TYPE_P(val) == IS_STRING && Z_STRLEN_P(val) > 0) {
+        intern->tmp_name = zend_string_copy(Z_STR_P(val));
+
+        /* Register for cleanup tracking */
+        if (SIGNALFORGE_HTTP_G(streamforge_upload_count) < SIGNALFORGE_MAX_STREAMFORGE_UPLOADS) {
+            int idx = SIGNALFORGE_HTTP_G(streamforge_upload_count)++;
+            SIGNALFORGE_HTTP_G(streamforge_temp_paths)[idx] = estrdup(Z_STRVAL_P(val));
+            SIGNALFORGE_HTTP_G(streamforge_temp_moved)[idx] = 0;
+            intern->streamforge_index = idx;
+        }
+    } else {
+        /* No path - upload error */
+        intern->tmp_name = NULL;
+        intern->error = 4; /* UPLOAD_ERR_NO_FILE */
+        return intern;
+    }
+
+    /* Get original filename */
+    snprintf(key, sizeof(key), "HTTP_X_UPLOAD_%d_FILENAME", index);
+    val = zend_hash_str_find(server_ht, key, strlen(key));
+    if (val && Z_TYPE_P(val) == IS_STRING) {
+        intern->client_filename = zend_string_copy(Z_STR_P(val));
+    } else {
+        intern->client_filename = NULL;
+    }
+
+    /* Get MIME type */
+    snprintf(key, sizeof(key), "HTTP_X_UPLOAD_%d_TYPE", index);
+    val = zend_hash_str_find(server_ht, key, strlen(key));
+    if (val && Z_TYPE_P(val) == IS_STRING) {
+        intern->client_media_type = zend_string_copy(Z_STR_P(val));
+    } else {
+        intern->client_media_type = NULL;
+    }
+
+    /* Get file size */
+    snprintf(key, sizeof(key), "HTTP_X_UPLOAD_%d_SIZE", index);
+    val = zend_hash_str_find(server_ht, key, strlen(key));
+    if (val) {
+        if (Z_TYPE_P(val) == IS_LONG) {
+            intern->size = Z_LVAL_P(val);
+        } else if (Z_TYPE_P(val) == IS_STRING) {
+            char *endptr = NULL;
+            zend_long parsed = ZEND_STRTOL(Z_STRVAL_P(val), &endptr, 10);
+            if (endptr && *endptr == '\0' && parsed >= 0) {
+                intern->size = parsed;
+            }
+        }
+    }
+
+    return intern;
+}
+
+/**
+ * Mark a streamforge upload as moved
+ *
+ * Called from moveTo() when file is successfully moved. This prevents
+ * RSHUTDOWN from trying to clean up a file that no longer exists at
+ * its original temp location.
+ */
+void signalforge_uploadedfile_mark_moved(signalforge_uploadedfile_object *intern)
+{
+    if (intern->from_streamforge && intern->streamforge_index >= 0 &&
+        intern->streamforge_index < SIGNALFORGE_MAX_STREAMFORGE_UPLOADS) {
+        SIGNALFORGE_HTTP_G(streamforge_temp_moved)[intern->streamforge_index] = 1;
+    }
 }
 

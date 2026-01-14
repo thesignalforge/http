@@ -17,17 +17,21 @@ extern zend_class_entry *signalforge_uploadedfile_ce;
  * ============================================================================ */
 
 typedef struct _signalforge_uploadedfile_object {
-    /* File information from $_FILES */
+    /* File information from $_FILES or streamforge */
     zend_string *tmp_name;          // Temporary file path (OWNED)
     zend_string *client_filename;   // Original filename (OWNED, may be NULL)
     zend_string *client_media_type; // MIME type (OWNED, may be NULL)
     zend_long size;                 // File size in bytes
     zend_long error;                // UPLOAD_ERR_* constant
-    
+
     /* Stream (lazy-loaded) */
     zval zv_stream;                 // StreamInterface object (lazy-loaded)
     zend_bool stream_loaded;        // Flag to track if stream was created
-    
+
+    /* Streamforge integration */
+    zend_bool from_streamforge;     // True if file came from streamforge proxy
+    int streamforge_index;          // Index in globals temp_paths array (-1 if N/A)
+
     /* Standard zend_object MUST be last member */
     zend_object std;
 } signalforge_uploadedfile_object;
@@ -56,6 +60,13 @@ void signalforge_uploadedfile_register_class(void);
  * ============================================================================ */
 
 signalforge_uploadedfile_object *signalforge_uploadedfile_from_files_array(zval *file_data, zval *return_value);
+
+/* Create UploadedFile from streamforge HTTP_X_UPLOAD_* headers */
+signalforge_uploadedfile_object *signalforge_uploadedfile_from_streamforge(
+    HashTable *server_ht, int index, zval *return_value);
+
+/* Mark streamforge upload as moved (prevents RSHUTDOWN cleanup) */
+void signalforge_uploadedfile_mark_moved(signalforge_uploadedfile_object *intern);
 
 #endif /* SIGNALFORGE_UPLOADEDFILE_H */
 
