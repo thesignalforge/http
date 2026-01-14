@@ -39,35 +39,72 @@ HTTP request/response handling is invoked on nearly every request, often hundred
 
 ## Streamforge Proxy Integration
 
-The extension integrates seamlessly with the [Streamforge](../streamforge) FastCGI proxy for high-performance file upload handling. When Streamforge is deployed between nginx and php-fpm, it offloads file upload I/O from PHP workers, dramatically improving throughput for upload-heavy applications.
+The extension integrates seamlessly with the [Streamforge](../streamforge) FastCGI proxy for high-performance file upload handling. When Streamforge is deployed between nginx and php-fpm, it provides several benefits depending on your nginx configuration.
 
-### How It Works
+### Understanding nginx Buffering
+
+**Important:** nginx's `fastcgi_request_buffering` setting affects what problem streamforge solves:
 
 ```
-WITHOUT STREAMFORGE:
-┌────────┐     ┌─────────┐     ┌───────────┐
-│ nginx  │────▶│ php-fpm │────▶│  $_FILES  │
-└────────┘     └─────────┘     └───────────┘
-                    │
-            Worker blocked during
-            entire upload duration
+WITH fastcgi_request_buffering ON (nginx default):
+┌────────┐     ┌───────────────┐     ┌─────────┐     ┌───────────┐
+│ Client │────▶│ nginx buffers │────▶│ php-fpm │────▶│  $_FILES  │
+└────────┘     └───────────────┘     └─────────┘     └───────────┘
+   slow              fast                 │
+                (to disk)          Worker engaged only
+                                   during fast transfer
 
-WITH STREAMFORGE:
-┌────────┐     ┌─────────────┐     ┌─────────┐     ┌─────────────────────┐
-│ nginx  │────▶│ streamforge │────▶│ php-fpm │────▶│ HTTP_X_UPLOAD_* hdrs│
-└────────┘     └─────────────┘     └─────────┘     └─────────────────────┘
-                     │
-              Files written to disk
-              before PHP starts
+WITH fastcgi_request_buffering OFF:
+┌────────┐     ┌───────┐     ┌─────────┐
+│ Client │────▶│ nginx │────▶│ php-fpm │  ← Worker blocked for entire upload!
+└────────┘     └───────┘     └─────────┘
+   slow         streams
+              directly
 ```
 
-### Benefits
+With default nginx settings, workers are already protected from slow clients. The upload is buffered by nginx first.
 
-| Scenario | Standard PHP | With Streamforge |
-|----------|--------------|------------------|
-| 500MB upload over slow connection | Worker blocked ~30s | Worker engaged ~5ms |
-| Memory per upload | Up to 500MB buffered | ~100KB proxy buffers |
-| 20 concurrent uploads, 10 workers | Site unresponsive | No impact on other requests |
+### When Streamforge Helps
+
+| nginx setting | Streamforge benefit |
+|---------------|---------------------|
+| `fastcgi_request_buffering on` (default) | Avoids double temp file write, reduces PHP memory, skips multipart parsing in PHP |
+| `fastcgi_request_buffering off` | **Full benefit**: Workers not blocked during slow uploads |
+
+### With `fastcgi_request_buffering off`
+
+This is where streamforge shines. Configure nginx to stream directly:
+
+```nginx
+location /upload {
+    fastcgi_request_buffering off;  # Stream to backend
+    fastcgi_pass streamforge:9001;
+}
+```
+
+Now streamforge handles the slow client I/O:
+
+```
+┌────────┐     ┌─────────────┐     ┌─────────┐
+│ Client │────▶│ streamforge │────▶│ php-fpm │
+└────────┘     └─────────────┘     └─────────┘
+   slow         writes to disk      Worker engaged
+                as data arrives     only ~5ms
+```
+
+| Scenario | Without Streamforge | With Streamforge |
+|----------|---------------------|------------------|
+| 500MB upload, slow client | Worker blocked ~30s | Worker engaged ~5ms |
+| 20 concurrent uploads, 10 workers | Site unresponsive | No impact |
+
+### With Default nginx (buffering on)
+
+Streamforge still provides value, just different:
+
+- **No double write**: nginx buffer → streamforge disk (not nginx buffer → PHP temp)
+- **Less PHP memory**: No request body buffering in PHP
+- **No multipart parsing**: PHP doesn't parse multipart boundaries
+- **Consistent API**: Same `HTTP_X_UPLOAD_*` interface regardless of nginx config
 
 ### Transparent Integration
 
