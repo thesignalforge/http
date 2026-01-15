@@ -32,6 +32,18 @@ extern zend_class_entry *signalforge_response_ce;
 extern zend_class_entry *signalforge_stream_ce;
 extern zend_class_entry *signalforge_uploadedfile_ce;
 extern zend_class_entry *signalforge_uri_ce;
+
+#ifdef HAVE_SIGNALFORGE_HTTP_CLIENT
+/* Class entries for PSR-18 client implementation */
+extern zend_class_entry *signalforge_client_ce;
+extern zend_class_entry *signalforge_http_request_pool_ce;
+
+/* Exception class entries */
+extern zend_class_entry *signalforge_http_exception_ce;
+extern zend_class_entry *signalforge_network_exception_ce;
+extern zend_class_entry *signalforge_request_exception_ce;
+#endif
+
 #define phpext_signalforge_http_ptr &signalforge_http_module_entry
 
 #define PHP_SIGNALFORGE_HTTP_VERSION "1.0.0"

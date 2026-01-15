@@ -23,6 +23,14 @@ $minimalParams = $minimalRequest->getServerParams();
 var_dump(isset($minimalParams['REQUEST_METHOD']));
 var_dump($minimalParams['REQUEST_METHOD'] === 'POST');
 ?>
+--CLEAN--
+<?php
+$_SERVER = [];
+$_GET = [];
+$_POST = [];
+$_COOKIE = [];
+$_FILES = [];
+?>
 --EXPECT--
 bool(true)
 bool(true)

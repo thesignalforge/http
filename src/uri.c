@@ -9,6 +9,7 @@
  */
 
 #include "uri.h"
+#include "psr7_interfaces.h"
 #include "ext/spl/spl_exceptions.h"
 #include "zend_smart_str.h"
 #include <ctype.h>
@@ -72,6 +73,112 @@ static inline int is_subdelim(unsigned char c)
     return c == '!' || c == '$' || c == '&' || c == '\'' ||
            c == '(' || c == ')' || c == '*' || c == '+' ||
            c == ',' || c == ';' || c == '=';
+}
+
+/* ============================================================================
+ * SECURITY VALIDATION
+ * ============================================================================ */
+
+/*
+ * Check for characters that could enable header injection attacks:
+ * - Null bytes (can truncate strings)
+ * - Newlines (can split headers - HTTP response splitting)
+ * - Carriage returns (same issue)
+ * - Control characters (0x00-0x1F, 0x7F)
+ *
+ * Returns 1 if string contains dangerous characters, 0 otherwise.
+ */
+static inline int signalforge_contains_injection_chars(const char *str, size_t len)
+{
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)str[i];
+        /* Control characters (0x00-0x1F) and DEL (0x7F) */
+        if (c < 0x20 || c == 0x7F) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * Validate host component per RFC 3986 and security requirements.
+ *
+ * Valid host characters:
+ * - reg-name: unreserved / pct-encoded / sub-delims
+ * - IPv4: digits and dots
+ * - IPv6: enclosed in brackets, allows hex and colons
+ *
+ * Security rules:
+ * - No null bytes, newlines, or control characters
+ * - No spaces (can cause header parsing issues)
+ *
+ * Returns 1 if valid, 0 if invalid.
+ */
+static int signalforge_validate_host(const char *host, size_t len)
+{
+    if (len == 0) {
+        return 1; /* Empty host is valid per RFC 3986 */
+    }
+
+    /* Check for injection characters first */
+    if (signalforge_contains_injection_chars(host, len)) {
+        return 0;
+    }
+
+    /* Handle IPv6 addresses: [::1] */
+    if (host[0] == '[') {
+        if (len < 3 || host[len - 1] != ']') {
+            return 0; /* Malformed IPv6 literal */
+        }
+        /* Validate IPv6 content (simplified) */
+        for (size_t i = 1; i < len - 1; i++) {
+            unsigned char c = (unsigned char)host[i];
+            if (!isxdigit(c) && c != ':' && c != '.') {
+                return 0;
+            }
+        }
+        return 1;
+    }
+
+    /* Validate regular hostname / IPv4 */
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)host[i];
+        /* Allow: unreserved (alphanumeric, -, ., _, ~) and sub-delims */
+        if (!is_unreserved(c) && !is_subdelim(c) && c != '%') {
+            /* Reject spaces and other invalid characters */
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+/*
+ * Validate userinfo component per RFC 3986.
+ *
+ * userinfo = *( unreserved / pct-encoded / sub-delims / ":" )
+ *
+ * Returns 1 if valid, 0 if invalid.
+ */
+static int signalforge_validate_userinfo(const char *str, size_t len)
+{
+    if (len == 0) {
+        return 1;
+    }
+
+    /* Check for injection characters */
+    if (signalforge_contains_injection_chars(str, len)) {
+        return 0;
+    }
+
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)str[i];
+        if (!is_unreserved(c) && !is_subdelim(c) && c != ':' && c != '%') {
+            return 0;
+        }
+    }
+
+    return 1;
 }
 
 /* Parse URI into components. Returns SUCCESS or FAILURE */
@@ -192,10 +299,22 @@ int signalforge_parse_uri(const char *uri, size_t len, signalforge_uri_object *r
             }
 
             if (colon) {
-                result->user = zend_string_init(auth, colon - auth, 0);
-                result->pass = zend_string_init(colon + 1, at - colon - 1, 0);
+                /* Security: Validate userinfo to prevent header injection */
+                size_t user_len = colon - auth;
+                size_t pass_len = at - colon - 1;
+                if (!signalforge_validate_userinfo(auth, user_len) ||
+                    !signalforge_validate_userinfo(colon + 1, pass_len)) {
+                    return FAILURE;
+                }
+                result->user = zend_string_init(auth, user_len, 0);
+                result->pass = zend_string_init(colon + 1, pass_len, 0);
             } else {
-                result->user = zend_string_init(auth, at - auth, 0);
+                /* Security: Validate userinfo to prevent header injection */
+                size_t user_len = at - auth;
+                if (!signalforge_validate_userinfo(auth, user_len)) {
+                    return FAILURE;
+                }
+                result->user = zend_string_init(auth, user_len, 0);
                 result->pass = NULL;
             }
             auth = at + 1;
@@ -249,6 +368,10 @@ int signalforge_parse_uri(const char *uri, size_t len, signalforge_uri_object *r
         }
         if (host_end > host_start) {
             size_t host_len = host_end - host_start;
+            /* Security: Validate host to prevent header injection */
+            if (!signalforge_validate_host(host_start, host_len)) {
+                return FAILURE;
+            }
             result->host = zend_string_init_lowercase(host_start, host_len);
         } else {
             result->host = NULL;  /* Getters return empty string for NULL */
@@ -346,6 +469,14 @@ static void signalforge_uri_free_obj(zend_object *object)
         zend_string_release(intern->fragment);
     }
 
+    /* Release cached computed values */
+    if (intern->cached_authority) {
+        zend_string_release(intern->cached_authority);
+    }
+    if (intern->cached_string) {
+        zend_string_release(intern->cached_string);
+    }
+
     zend_object_std_dtor(&intern->std);
 }
 
@@ -362,6 +493,10 @@ static zend_object *signalforge_uri_create_object(zend_class_entry *ce)
     intern->path = NULL;
     intern->query = NULL;
     intern->fragment = NULL;
+
+    /* Initialize cache fields */
+    intern->cached_authority = NULL;
+    intern->cached_string = NULL;
 
     zend_object_std_init(&intern->std, ce);
     object_properties_init(&intern->std, ce);
@@ -527,6 +662,11 @@ PHP_METHOD(Signalforge_Http_Uri, getAuthority)
     smart_str buf = {0};
     ZEND_PARSE_PARAMETERS_NONE();
 
+    /* Return cached value if available */
+    if (intern->cached_authority) {
+        RETURN_STR_COPY(intern->cached_authority);
+    }
+
     /* No host = no authority */
     if (!intern->host || ZSTR_LEN(intern->host) == 0) {
         RETURN_EMPTY_STRING();
@@ -554,6 +694,8 @@ PHP_METHOD(Signalforge_Http_Uri, getAuthority)
 
     smart_str_0(&buf);
     if (buf.s) {
+        /* Cache the result for future calls */
+        intern->cached_authority = zend_string_copy(buf.s);
         RETURN_NEW_STR(buf.s);
     }
     RETURN_EMPTY_STRING();
@@ -566,6 +708,11 @@ PHP_METHOD(Signalforge_Http_Uri, __toString)
     signalforge_uri_object *intern = Z_SIGNALFORGE_URI_P(ZEND_THIS);
     smart_str buf = {0};
     ZEND_PARSE_PARAMETERS_NONE();
+
+    /* Return cached value if available */
+    if (intern->cached_string) {
+        RETURN_STR_COPY(intern->cached_string);
+    }
 
     /* RFC 3986 Section 5.3: Component Recomposition */
 
@@ -624,6 +771,8 @@ PHP_METHOD(Signalforge_Http_Uri, __toString)
 
     smart_str_0(&buf);
     if (buf.s) {
+        /* Cache the result for future calls */
+        intern->cached_string = zend_string_copy(buf.s);
         RETURN_NEW_STR(buf.s);
     }
     RETURN_EMPTY_STRING();
@@ -674,6 +823,18 @@ PHP_METHOD(Signalforge_Http_Uri, withUserInfo)
         Z_PARAM_STR_OR_NULL(password)
     ZEND_PARSE_PARAMETERS_END();
 
+    /* Security: Validate userinfo to prevent header injection */
+    if (!signalforge_validate_userinfo(ZSTR_VAL(user), ZSTR_LEN(user))) {
+        zend_throw_exception(spl_ce_InvalidArgumentException,
+            "Invalid user: contains invalid characters", 0);
+        RETURN_THROWS();
+    }
+    if (password && !signalforge_validate_userinfo(ZSTR_VAL(password), ZSTR_LEN(password))) {
+        zend_throw_exception(spl_ce_InvalidArgumentException,
+            "Invalid password: contains invalid characters", 0);
+        RETURN_THROWS();
+    }
+
     src = Z_SIGNALFORGE_URI_P(ZEND_THIS);
     dst = signalforge_uri_clone(src, return_value);
 
@@ -706,6 +867,13 @@ PHP_METHOD(Signalforge_Http_Uri, withHost)
     ZEND_PARSE_PARAMETERS_START(1, 1)
         Z_PARAM_STR(host)
     ZEND_PARSE_PARAMETERS_END();
+
+    /* Security: Validate host to prevent header injection */
+    if (!signalforge_validate_host(ZSTR_VAL(host), ZSTR_LEN(host))) {
+        zend_throw_exception(spl_ce_InvalidArgumentException,
+            "Invalid host: contains invalid characters", 0);
+        RETURN_THROWS();
+    }
 
     src = Z_SIGNALFORGE_URI_P(ZEND_THIS);
     dst = signalforge_uri_clone(src, return_value);
@@ -1020,6 +1188,6 @@ void signalforge_uri_register_class(void)
     /* Mark as final - cannot be extended */
     signalforge_uri_ce->ce_flags |= ZEND_ACC_FINAL;
 
-    /* Implement Stringable interface */
-    zend_class_implements(signalforge_uri_ce, 1, zend_ce_stringable);
+    /* Implement PSR-7 UriInterface and Stringable */
+    zend_class_implements(signalforge_uri_ce, 2, psr7_uri_interface_ce, zend_ce_stringable);
 }

@@ -25,6 +25,10 @@ typedef struct _signalforge_uri_object {
     zend_string *query;         /* "key=value&foo=bar" (without ?) */
     zend_string *fragment;      /* "section" (without #) */
 
+    /* Cached computed values (NULL = needs rebuild) */
+    zend_string *cached_authority;  /* Cached getAuthority() result */
+    zend_string *cached_string;     /* Cached __toString() result */
+
     /* Standard zend_object MUST be last */
     zend_object std;
 } signalforge_uri_object;

@@ -19,16 +19,20 @@ typedef struct _signalforge_response_object {
     /* Status */
     zend_long status_code;
     zend_string *reason_phrase;  // NULL = auto from status code
-    
+
     /* Headers - stored as HashTable (lowercase keys) */
     HashTable *ht_headers;              // OWNED, must be freed
-    
+
     /* Body */
     zval zv_body;                       // StreamInterface object or string
     zend_bool body_is_stream;           // Track if body is a stream
-    
+
     /* Protocol version */
     zend_string *protocol_version;      // "1.1" or "1.0"
+
+    /* Headers array cache - improves getHeaders() performance */
+    zval cached_headers_array;          // Cached array representation
+    zend_bool headers_dirty;            // True if cache needs refresh
 
     /* Standard zend_object MUST be last */
     zend_object std;

@@ -35,6 +35,14 @@ var_dump($serverParams['SERVER_PORT'] === '80');
 var_dump(isset($serverParams['HTTP_HOST']));
 var_dump($serverParams['HTTP_HOST'] === 'example.com');
 ?>
+--CLEAN--
+<?php
+$_SERVER = [];
+$_GET = [];
+$_POST = [];
+$_COOKIE = [];
+$_FILES = [];
+?>
 --EXPECT--
 bool(true)
 bool(true)
