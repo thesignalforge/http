@@ -258,14 +258,6 @@ if test "$PHP_SIGNALFORGE_HTTP" != "no"; then
   PHP_ADD_INCLUDE($ext_srcdir/src/factories)
 
   dnl Install headers for potential use by other extensions
-  PHP_INSTALL_HEADERS([ext/signalforge_http], [
-    php_signalforge_http.h
-    src/request.h
-    src/response.h
-    src/stream.h
-    src/uploadedfile.h
-    src/uri.h
-    src/client/client.h
-  ])
+  PHP_INSTALL_HEADERS([ext/signalforge_http], [php_signalforge_http.h src/request.h src/response.h src/stream.h src/uploadedfile.h src/uri.h])
 
 fi
