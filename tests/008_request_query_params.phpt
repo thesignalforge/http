@@ -46,6 +46,14 @@ var_dump($request->getQueryParams() !== $newRequest->getQueryParams());
 var_dump($request !== $newRequest);
 var_dump($request->getQueryParams()['foo'] === 'bar'); // Original unchanged
 ?>
+--CLEAN--
+<?php
+$_SERVER = [];
+$_GET = [];
+$_POST = [];
+$_COOKIE = [];
+$_FILES = [];
+?>
 --EXPECT--
 bool(true)
 bool(true)

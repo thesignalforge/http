@@ -329,7 +329,7 @@ PHP_METHOD(Signalforge_Http_UploadedFile, getStream)
     /* Check error first */
     if (intern->error != 0) { /* UPLOAD_ERR_OK = 0 */
         zend_throw_exception_ex(zend_ce_exception, 0,
-            "Cannot get stream: file upload error", intern->error);
+            "Cannot get stream: file upload error " ZEND_LONG_FMT, intern->error);
         RETURN_THROWS();
     }
 

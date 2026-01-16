@@ -47,6 +47,14 @@ $noCookieRequest = Request::capture();
 // ASSERT: Empty cookies
 var_dump($noCookieRequest->getCookieParams() === []);
 ?>
+--CLEAN--
+<?php
+$_SERVER = [];
+$_GET = [];
+$_POST = [];
+$_COOKIE = [];
+$_FILES = [];
+?>
 --EXPECT--
 bool(true)
 bool(true)

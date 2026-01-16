@@ -45,6 +45,14 @@ $nullRequest = $request->withParsedBody(null);
 var_dump($nullRequest->getParsedBody() === null);
 var_dump($request !== $nullRequest);
 ?>
+--CLEAN--
+<?php
+$_SERVER = [];
+$_GET = [];
+$_POST = [];
+$_COOKIE = [];
+$_FILES = [];
+?>
 --EXPECT--
 bool(true)
 bool(true)

@@ -328,7 +328,7 @@ PHP_METHOD(Signalforge_Http_Stream, getContents)
 
     /* Stream copy failed, try manual reading as fallback */
     smart_str buf = {0};
-    char read_buf[65536]; /* Use larger buffer for better performance */
+    char read_buf[262144]; /* 256KB buffer for optimal large payload performance */
     ssize_t read_len;
 
     while ((read_len = php_stream_read(stream, read_buf, sizeof(read_buf))) > 0) {

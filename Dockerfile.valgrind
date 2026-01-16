@@ -81,7 +81,7 @@ WORKDIR /build
 COPY . /build
 
 RUN /usr/local/bin/phpize \
-    && CFLAGS="-g -O0" ./configure --enable-signalforge_http \
+    && CFLAGS="-g -O0" ./configure --enable-signalforge_http --enable-signalforge-http-client \
     && make -j$(nproc) \
     && make install
 

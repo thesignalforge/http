@@ -26,13 +26,13 @@ mkinstalldirs
 run-tests.php
 *.dep
 
-# Test output
-tests/*.diff
-tests/*.exp
-tests/*.log
-tests/*.out
-tests/*.php
-tests/*.sh
+# Test output (recursive for subdirectories)
+tests/**/*.diff
+tests/**/*.exp
+tests/**/*.log
+tests/**/*.out
+tests/**/*.php
+tests/**/*.sh
 
 # Dependencies
 .deps/
@@ -43,6 +43,13 @@ tests/*.sh
 *.swp
 *~
 .DS_Store
+
+# Language servers and tooling
+.clangd/
+compile_commands.json
+tags
+tags.lock
+TAGS
 
 .claude
 .claude/*

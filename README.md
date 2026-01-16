@@ -715,7 +715,7 @@ http/
 │   ├── psr7_interfaces.c/h      # PSR-7 interface definitions
 ├── Signalforge/Http/            # IDE stubs
 ├── examples/                    # Usage examples
-├── tests/                       # phpt test files (97 tests)
+├── tests/                       # phpt test files (206 tests)
 └── Dockerfile                   # Docker build environment
 ```
 
