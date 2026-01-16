@@ -167,9 +167,9 @@ final class Request implements \Psr\Http\Message\ServerRequestInterface
     /**
      * Retrieves the URI instance.
      *
-     * @return string URI as string (basic implementation)
+     * @return \Psr\Http\Message\UriInterface URI instance
      */
-    public function getUri(): string {}
+    public function getUri(): \Psr\Http\Message\UriInterface {}
 
     /**
      * Returns an instance with the provided URI.

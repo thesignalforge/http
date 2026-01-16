@@ -29,7 +29,7 @@ extern zend_class_entry *signalforge_response_ce;
  * Create a new response data structure
  */
 signalforge_client_response_t *signalforge_client_response_create(void) {
-    return calloc(1, sizeof(signalforge_client_response_t));
+    return ecalloc(1, sizeof(signalforge_client_response_t));
 }
 
 /**
@@ -40,18 +40,22 @@ void signalforge_client_response_destroy(signalforge_client_response_t *response
         return;
     }
 
-    free(response->body);
-    free(response->error_message);
+    if (response->body) {
+        efree(response->body);
+    }
+    if (response->error_message) {
+        efree(response->error_message);
+    }
 
     if (response->headers) {
         for (size_t i = 0; i < response->header_count; i++) {
-            free(response->headers[i].name);
-            free(response->headers[i].value);
+            if (response->headers[i].name) efree(response->headers[i].name);
+            if (response->headers[i].value) efree(response->headers[i].value);
         }
-        free(response->headers);
+        efree(response->headers);
     }
 
-    free(response);
+    efree(response);
 }
 
 /**
@@ -120,7 +124,7 @@ zval signalforge_client_create_psr7_response(signalforge_client_response_t *resp
         }
 
         /* Normalize header name to lowercase */
-        char *lower_name = strdup(response->headers[i].name);
+        char *lower_name = estrdup(response->headers[i].name);
         if (!lower_name) continue;
         for (char *p = lower_name; *p; p++) {
             *p = tolower((unsigned char)*p);
@@ -139,7 +143,7 @@ zval signalforge_client_create_psr7_response(signalforge_client_response_t *resp
             zend_hash_str_add(intern->ht_headers, lower_name, strlen(lower_name), &header_array);
         }
 
-        free(lower_name);
+        efree(lower_name);
     }
 
     /* Set body as string (will be wrapped in Stream when getBody() is called) */

@@ -33,7 +33,7 @@
  * Create a new handle pool
  */
 signalforge_curl_handle_pool_t *signalforge_curl_handle_pool_create(void) {
-    signalforge_curl_handle_pool_t *pool = calloc(1, sizeof(signalforge_curl_handle_pool_t));
+    signalforge_curl_handle_pool_t *pool = ecalloc(1, sizeof(signalforge_curl_handle_pool_t));
     if (!pool) {
         return NULL;
     }
@@ -125,7 +125,7 @@ void signalforge_curl_handle_pool_destroy(signalforge_curl_handle_pool_t *pool) 
         }
     }
 
-    free(pool);
+    efree(pool);
 }
 
 /* Zero-copy request body read callback */
@@ -161,7 +161,7 @@ static size_t write_callback(void *ptr, size_t size, size_t nmemb, void *userdat
             new_capacity = req->response_body_len + total_size + 4096;
         }
 
-        char *new_body = realloc(req->response_body, new_capacity);
+        char *new_body = erealloc(req->response_body, new_capacity);
         if (!new_body) {
             return 0;
         }
@@ -187,7 +187,7 @@ static size_t header_callback(void *ptr, size_t size, size_t nmemb, void *userda
             new_capacity = req->response_headers_len + total_size + 1024;
         }
 
-        char *new_headers = realloc(req->response_headers, new_capacity);
+        char *new_headers = erealloc(req->response_headers, new_capacity);
         if (!new_headers) {
             return 0;
         }
@@ -227,7 +227,7 @@ static void parse_response_headers(signalforge_active_request_t *req) {
         return;
     }
 
-    req->response->headers = malloc(sizeof(signalforge_client_header_t) * header_count);
+    req->response->headers = emalloc(sizeof(signalforge_client_header_t) * header_count);
     if (!req->response->headers) {
         return;
     }
@@ -242,7 +242,7 @@ static void parse_response_headers(signalforge_active_request_t *req) {
         char *colon = memchr(ptr, ':', line_end - ptr);
         if (colon) {
             size_t name_len = colon - ptr;
-            char *name = malloc(name_len + 1);
+            char *name = emalloc(name_len + 1);
             if (name) {
                 memcpy(name, ptr, name_len);
                 name[name_len] = '\0';
@@ -261,7 +261,7 @@ static void parse_response_headers(signalforge_active_request_t *req) {
                     value_len--;
                 }
 
-                char *value = malloc(value_len + 1);
+                char *value = emalloc(value_len + 1);
                 if (value) {
                     memcpy(value, value_start, value_len);
                     value[value_len] = '\0';
@@ -270,7 +270,7 @@ static void parse_response_headers(signalforge_active_request_t *req) {
                     req->response->headers[idx].value = value;
                     idx++;
                 } else {
-                    free(name);
+                    efree(name);
                 }
             }
         }
@@ -370,11 +370,15 @@ static int setup_curl_handle(
     if (req->request->headers && req->request->header_count > 0) {
         struct curl_slist *list = NULL;
         for (size_t i = 0; i < req->request->header_count; i++) {
-            char *header = malloc(strlen(req->request->headers[i].name) + strlen(req->request->headers[i].value) + 3);
+            size_t header_len = strlen(req->request->headers[i].name) +
+                               strlen(req->request->headers[i].value) + 3;
+            char *header = emalloc(header_len);
             if (header) {
-                sprintf(header, "%s: %s", req->request->headers[i].name, req->request->headers[i].value);
+                snprintf(header, header_len, "%s: %s",
+                        req->request->headers[i].name,
+                        req->request->headers[i].value);
                 list = curl_slist_append(list, header);
-                free(header);
+                efree(header);
             }
         }
         if (list) {
@@ -437,10 +441,10 @@ static void cleanup_active_request(signalforge_active_request_t *req, signalforg
         req->header_list = NULL;
     }
 
-    free(req->response_body);
+    efree(req->response_body);
     req->response_body = NULL;
 
-    free(req->response_headers);
+    efree(req->response_headers);
     req->response_headers = NULL;
 
     req->body_read_ctx.data = NULL;
@@ -476,15 +480,15 @@ void *signalforge_client_worker_thread(void *arg) {
             signalforge_client_queue_pop(worker->request_queue, 100);
 
         if (request) {
-            signalforge_active_request_t *active_req = calloc(1, sizeof(signalforge_active_request_t));
+            signalforge_active_request_t *active_req = ecalloc(1, sizeof(signalforge_active_request_t));
             if (active_req) {
                 active_req->request = request;
                 active_req->response = signalforge_client_response_create();
 
                 active_req->response_body_capacity = 4096;
-                active_req->response_body = malloc(active_req->response_body_capacity);
+                active_req->response_body = emalloc(active_req->response_body_capacity);
                 active_req->response_headers_capacity = 1024;
-                active_req->response_headers = malloc(active_req->response_headers_capacity);
+                active_req->response_headers = emalloc(active_req->response_headers_capacity);
 
                 if (active_req->response && active_req->response_body && active_req->response_headers) {
                     CURLSH *share = signalforge_client_share_get_handle(pool->share);
@@ -529,7 +533,7 @@ void *signalforge_client_worker_thread(void *arg) {
 
                                     if (msg->data.result != CURLE_OK) {
                                         active_req->response->is_error = 1;
-                                        active_req->response->error_message = strdup(curl_easy_strerror(msg->data.result));
+                                        active_req->response->error_message = estrdup(curl_easy_strerror(msg->data.result));
 
                                         switch (msg->data.result) {
                                             case CURLE_SSL_CONNECT_ERROR:
@@ -586,7 +590,7 @@ void *signalforge_client_worker_thread(void *arg) {
 
                         cleanup_active_request(active_req, handle_pool, discard_handle);
                         signalforge_client_request_destroy(active_req->request);
-                        free(active_req);
+                        efree(active_req);
                     } else {
                         active_req->response->is_error = 1;
                         active_req->response->curl_code = CURLE_FAILED_INIT;
@@ -594,15 +598,15 @@ void *signalforge_client_worker_thread(void *arg) {
 
                         cleanup_active_request(active_req, handle_pool, 0);
                         signalforge_client_request_destroy(active_req->request);
-                        free(active_req);
+                        efree(active_req);
                     }
                 } else {
                     if (active_req->response) {
                         signalforge_client_response_destroy(active_req->response);
                     }
-                    free(active_req->response_body);
-                    free(active_req->response_headers);
-                    free(active_req);
+                    efree(active_req->response_body);
+                    efree(active_req->response_headers);
+                    efree(active_req);
                     signalforge_client_request_destroy(request);
                 }
             } else {

@@ -33,8 +33,8 @@ signalforge_client_request_t *signalforge_client_request_create(
     size_t body_len,
     signalforge_client_config_t *config
 ) {
-    /* Use calloc for zero-initialization */
-    signalforge_client_request_t *request = calloc(1, sizeof(signalforge_client_request_t));
+    /* Use ecalloc for zero-initialization */
+    signalforge_client_request_t *request = ecalloc(1, sizeof(signalforge_client_request_t));
     if (!request) {
         return NULL;
     }
@@ -44,19 +44,19 @@ signalforge_client_request_t *signalforge_client_request_create(
 
     /* Copy method */
     if (method) {
-        request->method = strdup(method);
+        request->method = estrdup(method);
         if (!request->method) {
-            free(request);
+            efree(request);
             return NULL;
         }
     }
 
     /* Copy URL */
     if (url) {
-        request->url = strdup(url);
+        request->url = estrdup(url);
         if (!request->url) {
-            free(request->method);
-            free(request);
+            efree(request->method);
+            efree(request);
             return NULL;
         }
     }
@@ -67,11 +67,11 @@ signalforge_client_request_t *signalforge_client_request_create(
         request->header_count = zend_hash_num_elements(ht);
 
         if (request->header_count > 0) {
-            request->headers = malloc(sizeof(signalforge_client_header_t) * request->header_count);
+            request->headers = emalloc(sizeof(signalforge_client_header_t) * request->header_count);
             if (!request->headers) {
-                free(request->url);
-                free(request->method);
-                free(request);
+                efree(request->url);
+                efree(request->method);
+                efree(request);
                 return NULL;
             }
 
@@ -85,7 +85,7 @@ signalforge_client_request_t *signalforge_client_request_create(
 
                     if (Z_TYPE_P(val) == IS_STRING) {
                         /* Simple string value */
-                        header_value = strdup(Z_STRVAL_P(val));
+                        header_value = estrdup(Z_STRVAL_P(val));
                     } else if (Z_TYPE_P(val) == IS_ARRAY) {
                         /* PSR-7 format: array of values - join with ", " */
                         HashTable *vals = Z_ARRVAL_P(val);
@@ -101,7 +101,7 @@ signalforge_client_request_t *signalforge_client_request_create(
                         } ZEND_HASH_FOREACH_END();
 
                         if (total_len > 0) {
-                            header_value = malloc(total_len + 1);
+                            header_value = emalloc(total_len + 1);
                             if (header_value) {
                                 header_value[0] = '\0';
                                 size_t pos = 0;
@@ -125,20 +125,20 @@ signalforge_client_request_t *signalforge_client_request_create(
                     }
 
                     if (header_value) {
-                        request->headers[idx].name = strdup(ZSTR_VAL(key));
+                        request->headers[idx].name = estrdup(ZSTR_VAL(key));
                         request->headers[idx].value = header_value;
 
                         if (!request->headers[idx].name) {
-                            free(header_value);
+                            efree(header_value);
                             /* Cleanup on error */
                             for (size_t i = 0; i < idx; i++) {
-                                free(request->headers[i].name);
-                                free(request->headers[i].value);
+                                efree(request->headers[i].name);
+                                efree(request->headers[i].value);
                             }
-                            free(request->headers);
-                            free(request->url);
-                            free(request->method);
-                            free(request);
+                            efree(request->headers);
+                            efree(request->url);
+                            efree(request->method);
+                            efree(request);
                             return NULL;
                         }
                         idx++;
@@ -152,16 +152,16 @@ signalforge_client_request_t *signalforge_client_request_create(
 
     /* Copy body */
     if (body && body_len > 0) {
-        request->body = malloc(body_len);
+        request->body = emalloc(body_len);
         if (!request->body) {
             for (size_t i = 0; i < request->header_count; i++) {
-                free(request->headers[i].name);
-                free(request->headers[i].value);
+                efree(request->headers[i].name);
+                efree(request->headers[i].value);
             }
-            free(request->headers);
-            free(request->url);
-            free(request->method);
-            free(request);
+            efree(request->headers);
+            efree(request->url);
+            efree(request->method);
+            efree(request);
             return NULL;
         }
         memcpy(request->body, body, body_len);
@@ -182,19 +182,19 @@ void signalforge_client_request_destroy(signalforge_client_request_t *request) {
         return;
     }
 
-    free(request->method);
-    free(request->url);
+    efree(request->method);
+    efree(request->url);
 
     if (request->headers) {
         for (size_t i = 0; i < request->header_count; i++) {
-            free(request->headers[i].name);
-            free(request->headers[i].value);
+            efree(request->headers[i].name);
+            efree(request->headers[i].value);
         }
-        free(request->headers);
+        efree(request->headers);
     }
 
-    free(request->body);
-    free(request);
+    efree(request->body);
+    efree(request);
 }
 
 #endif /* HAVE_SIGNALFORGE_HTTP_CLIENT */

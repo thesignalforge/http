@@ -119,18 +119,18 @@ static void signalforge_client_free_object(zend_object *object) {
 
     if (client->config) {
         if (client->config->proxy) {
-            free(client->config->proxy);
+            efree(client->config->proxy);
         }
         if (client->config->user_agent) {
-            free(client->config->user_agent);
+            efree(client->config->user_agent);
         }
         if (client->config->ca_cert) {
-            free(client->config->ca_cert);
+            efree(client->config->ca_cert);
         }
         if (client->config->retry_config) {
             signalforge_client_retry_config_destroy(client->config->retry_config);
         }
-        free(client->config);
+        efree(client->config);
         client->config = NULL;
     }
 
@@ -196,13 +196,13 @@ static char *extract_method(zval *request_obj) {
     zend_call_method_with_0_params(Z_OBJ_P(request_obj), Z_OBJCE_P(request_obj), NULL, "getmethod", &method_result);
 
     if (Z_TYPE(method_result) == IS_STRING && Z_STRLEN(method_result) > 0) {
-        char *method = strdup(Z_STRVAL(method_result));
+        char *method = estrdup(Z_STRVAL(method_result));
         zval_ptr_dtor(&method_result);
         return method;
     }
 
     zval_ptr_dtor(&method_result);
-    return strdup("GET");
+    return estrdup("GET");
 }
 
 static char *extract_uri(zval *request_obj) {
@@ -215,20 +215,20 @@ static char *extract_uri(zval *request_obj) {
         zend_call_method_with_0_params(Z_OBJ(uri_result), Z_OBJCE(uri_result), NULL, "__tostring", &str_result);
 
         if (Z_TYPE(str_result) == IS_STRING && Z_STRLEN(str_result) > 0) {
-            char *uri = strdup(Z_STRVAL(str_result));
+            char *uri = estrdup(Z_STRVAL(str_result));
             zval_ptr_dtor(&str_result);
             zval_ptr_dtor(&uri_result);
             return uri;
         }
         zval_ptr_dtor(&str_result);
     } else if (Z_TYPE(uri_result) == IS_STRING && Z_STRLEN(uri_result) > 0) {
-        char *uri = strdup(Z_STRVAL(uri_result));
+        char *uri = estrdup(Z_STRVAL(uri_result));
         zval_ptr_dtor(&uri_result);
         return uri;
     }
 
     zval_ptr_dtor(&uri_result);
-    return strdup("http://localhost/");
+    return estrdup("http://localhost/");
 }
 
 static void extract_headers(zval *request_obj, zval *headers_array) {
@@ -256,7 +256,7 @@ static void extract_body(zval *request_obj, char **body, size_t *body_len) {
         zend_string *str = zval_get_string(&body_result);
 
         if (str && ZSTR_LEN(str) > 0) {
-            *body = malloc(ZSTR_LEN(str));
+            *body = emalloc(ZSTR_LEN(str));
             if (*body) {
                 memcpy(*body, ZSTR_VAL(str), ZSTR_LEN(str));
                 *body_len = ZSTR_LEN(str);
@@ -264,7 +264,7 @@ static void extract_body(zval *request_obj, char **body, size_t *body_len) {
         }
         zend_string_release(str);
     } else if (Z_TYPE(body_result) == IS_STRING && Z_STRLEN(body_result) > 0) {
-        *body = malloc(Z_STRLEN(body_result));
+        *body = emalloc(Z_STRLEN(body_result));
         if (*body) {
             memcpy(*body, Z_STRVAL(body_result), Z_STRLEN(body_result));
             *body_len = Z_STRLEN(body_result);
@@ -301,9 +301,11 @@ static signalforge_client_request_t *signalforge_client_psr7_extract_request(
         config
     );
 
-    free(method);
-    free(url);
-    free(body);
+    efree(method);
+    efree(url);
+    if (body) {
+        efree(body);
+    }
     zval_ptr_dtor(&headers);
 
     return request;
@@ -323,7 +325,7 @@ static PHP_METHOD(SignalforgeClient, __construct) {
 
     client_obj = SIGNALFORGE_CLIENT_FROM_ZOBJ(Z_OBJ_P(ZEND_THIS));
 
-    config = calloc(1, sizeof(signalforge_client_config_t));
+    config = ecalloc(1, sizeof(signalforge_client_config_t));
     if (!config) {
         zend_throw_exception(signalforge_http_exception_ce, "Failed to allocate memory for configuration", 0);
         RETURN_THROWS();
@@ -380,13 +382,13 @@ static PHP_METHOD(SignalforgeClient, __construct) {
 
         if ((val = zend_hash_str_find(Z_ARRVAL_P(options), "proxy", sizeof("proxy") - 1)) != NULL) {
             zend_string *proxy_str = zval_get_string(val);
-            config->proxy = strdup(ZSTR_VAL(proxy_str));
+            config->proxy = estrdup(ZSTR_VAL(proxy_str));
             zend_string_release(proxy_str);
         }
 
         if ((val = zend_hash_str_find(Z_ARRVAL_P(options), "user_agent", sizeof("user_agent") - 1)) != NULL) {
             zend_string *ua_str = zval_get_string(val);
-            config->user_agent = strdup(ZSTR_VAL(ua_str));
+            config->user_agent = estrdup(ZSTR_VAL(ua_str));
             zend_string_release(ua_str);
         }
 
@@ -400,7 +402,7 @@ static PHP_METHOD(SignalforgeClient, __construct) {
 
         if ((val = zend_hash_str_find(Z_ARRVAL_P(options), "ca_cert", sizeof("ca_cert") - 1)) != NULL) {
             zend_string *ca_str = zval_get_string(val);
-            config->ca_cert = strdup(ZSTR_VAL(ca_str));
+            config->ca_cert = estrdup(ZSTR_VAL(ca_str));
             zend_string_release(ca_str);
         }
 
@@ -456,7 +458,7 @@ static PHP_METHOD(SignalforgeClient, __construct) {
     /* Create shared connection cache */
     client_obj->share = signalforge_client_share_create();
     if (!client_obj->share) {
-        free(config);
+        efree(config);
         client_obj->config = NULL;
         zend_throw_exception(signalforge_http_exception_ce, "Failed to create shared connection cache", 0);
         RETURN_THROWS();
@@ -470,7 +472,7 @@ static PHP_METHOD(SignalforgeClient, __construct) {
         if (!client_obj->thread_pool) {
             signalforge_client_share_destroy(client_obj->share);
             client_obj->share = NULL;
-            free(config);
+            efree(config);
             client_obj->config = NULL;
             zend_throw_exception(signalforge_http_exception_ce, "Failed to create thread pool", 0);
             RETURN_THROWS();
@@ -534,7 +536,7 @@ static PHP_METHOD(SignalforgeClient, sendRequest) {
         char *msg_copy = NULL;
 
         if (response->error_message) {
-            msg_copy = strdup(response->error_message);
+            msg_copy = estrdup(response->error_message);
         }
 
         signalforge_client_response_destroy(response);
@@ -555,7 +557,9 @@ static PHP_METHOD(SignalforgeClient, sendRequest) {
 
         zend_throw_exception(signalforge_network_exception_ce, detailed_msg, (zend_long)curl_code);
 
-        free(msg_copy);
+        if (msg_copy) {
+            efree(msg_copy);
+        }
         RETURN_THROWS();
     }
 

@@ -38,14 +38,14 @@ signalforge_curl_multi_pool_t *signalforge_curl_multi_pool_create(
     signalforge_client_config_t *config,
     int max_concurrent
 ) {
-    signalforge_curl_multi_pool_t *pool = calloc(1, sizeof(signalforge_curl_multi_pool_t));
+    signalforge_curl_multi_pool_t *pool = ecalloc(1, sizeof(signalforge_curl_multi_pool_t));
     if (!pool) {
         return NULL;
     }
 
     pool->multi_handle = curl_multi_init();
     if (!pool->multi_handle) {
-        free(pool);
+        efree(pool);
         return NULL;
     }
 
@@ -65,10 +65,10 @@ signalforge_curl_multi_pool_t *signalforge_curl_multi_pool_create(
 
     /* Initialize response array */
     pool->response_capacity = RESPONSE_ARRAY_INITIAL_CAPACITY;
-    pool->responses = calloc(pool->response_capacity, sizeof(signalforge_client_response_t *));
+    pool->responses = ecalloc(pool->response_capacity, sizeof(signalforge_client_response_t *));
     if (!pool->responses) {
         curl_multi_cleanup(pool->multi_handle);
-        free(pool);
+        efree(pool);
         return NULL;
     }
     pool->response_count = 0;
@@ -126,7 +126,7 @@ static int add_response(
 ) {
     if (pool->response_count >= pool->response_capacity) {
         size_t new_capacity = pool->response_capacity * 2;
-        signalforge_client_response_t **new_responses = realloc(
+        signalforge_client_response_t **new_responses = erealloc(
             pool->responses,
             new_capacity * sizeof(signalforge_client_response_t *)
         );
@@ -153,7 +153,7 @@ int signalforge_curl_multi_pool_add(
     }
 
     /* Create active request tracking structure */
-    signalforge_multi_active_request_t *active_req = calloc(1, sizeof(signalforge_multi_active_request_t));
+    signalforge_multi_active_request_t *active_req = ecalloc(1, sizeof(signalforge_multi_active_request_t));
     if (!active_req) {
         return -1;
     }
@@ -163,31 +163,31 @@ int signalforge_curl_multi_pool_add(
     active_req->ctx.request = request;
     active_req->ctx.response = signalforge_client_response_create();
     if (!active_req->ctx.response) {
-        free(active_req);
+        efree(active_req);
         return -1;
     }
 
     /* Allocate response buffers */
     active_req->ctx.response_body_capacity = 4096;
-    active_req->ctx.response_body = malloc(active_req->ctx.response_body_capacity);
+    active_req->ctx.response_body = emalloc(active_req->ctx.response_body_capacity);
     active_req->ctx.response_headers_capacity = 1024;
-    active_req->ctx.response_headers = malloc(active_req->ctx.response_headers_capacity);
+    active_req->ctx.response_headers = emalloc(active_req->ctx.response_headers_capacity);
 
     if (!active_req->ctx.response_body || !active_req->ctx.response_headers) {
-        free(active_req->ctx.response_body);
-        free(active_req->ctx.response_headers);
+        if (active_req->ctx.response_body) efree(active_req->ctx.response_body);
+        if (active_req->ctx.response_headers) efree(active_req->ctx.response_headers);
         signalforge_client_response_destroy(active_req->ctx.response);
-        free(active_req);
+        efree(active_req);
         return -1;
     }
 
     /* Create curl handle */
     CURL *curl = curl_easy_init();
     if (!curl) {
-        free(active_req->ctx.response_body);
-        free(active_req->ctx.response_headers);
+        efree(active_req->ctx.response_body);
+        efree(active_req->ctx.response_headers);
         signalforge_client_response_destroy(active_req->ctx.response);
-        free(active_req);
+        efree(active_req);
         return -1;
     }
 
@@ -196,10 +196,10 @@ int signalforge_curl_multi_pool_add(
     /* Setup curl handle */
     if (signalforge_curl_setup(curl, &active_req->ctx, pool->share_handle, pool->config) != 0) {
         curl_easy_cleanup(curl);
-        free(active_req->ctx.response_body);
-        free(active_req->ctx.response_headers);
+        efree(active_req->ctx.response_body);
+        efree(active_req->ctx.response_headers);
         signalforge_client_response_destroy(active_req->ctx.response);
-        free(active_req);
+        efree(active_req);
         return -1;
     }
 
@@ -209,7 +209,7 @@ int signalforge_curl_multi_pool_add(
         signalforge_curl_cleanup_context(&active_req->ctx);
         curl_easy_cleanup(curl);
         signalforge_client_response_destroy(active_req->ctx.response);
-        free(active_req);
+        efree(active_req);
         return -1;
     }
 
@@ -243,7 +243,7 @@ static void process_completed(
         /* Error occurred */
         ctx->response->is_error = 1;
         ctx->response->curl_code = result;
-        ctx->response->error_message = strdup(curl_easy_strerror(result));
+        ctx->response->error_message = estrdup(curl_easy_strerror(result));
 
         /* Still try to get any partial response data */
         curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &ctx->response->http_code);
@@ -263,10 +263,14 @@ static void process_completed(
     }
 
     /* Free temporary buffers (body/headers already transferred or error) */
-    free(ctx->response_body);
-    ctx->response_body = NULL;
-    free(ctx->response_headers);
-    ctx->response_headers = NULL;
+    if (ctx->response_body) {
+        efree(ctx->response_body);
+        ctx->response_body = NULL;
+    }
+    if (ctx->response_headers) {
+        efree(ctx->response_headers);
+        ctx->response_headers = NULL;
+    }
 
     /* Add response to results */
     add_response(pool, ctx->response);
@@ -280,7 +284,7 @@ static void process_completed(
 
     /* Remove from active list and free */
     remove_active_request(pool, active_req);
-    free(active_req);
+    efree(active_req);
 }
 
 /**
@@ -391,7 +395,7 @@ void signalforge_curl_multi_pool_destroy(signalforge_curl_multi_pool_t *pool) {
             signalforge_client_request_destroy(current->ctx.request);
         }
 
-        free(current);
+        efree(current);
         current = next;
     }
 
@@ -401,9 +405,9 @@ void signalforge_curl_multi_pool_destroy(signalforge_curl_multi_pool_t *pool) {
     }
 
     /* Free response array (but not the responses themselves) */
-    free(pool->responses);
+    efree(pool->responses);
 
-    free(pool);
+    efree(pool);
 }
 
 #endif /* HAVE_SIGNALFORGE_HTTP_CLIENT */

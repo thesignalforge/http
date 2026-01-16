@@ -18,6 +18,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <string.h>
+#include <limits.h>
 
 /* ============================================================================
  * GLOBAL STATE
@@ -452,31 +453,82 @@ PHP_METHOD(Signalforge_Http_UploadedFile, moveTo)
         RETURN_THROWS();
     }
 
-    /* Validate target path for security */
-    if (strstr(ZSTR_VAL(target_path), "..") != NULL) {
+    /* Security: Reject paths containing null bytes (truncation attack) */
+    if (memchr(ZSTR_VAL(target_path), '\0', ZSTR_LEN(target_path)) != NULL) {
+        zend_throw_exception(spl_ce_InvalidArgumentException,
+            "Invalid target path: contains null byte", 0);
+        RETURN_THROWS();
+    }
+
+    /* Security: Require absolute paths to prevent ambiguity */
+    if (ZSTR_VAL(target_path)[0] != '/') {
+        zend_throw_exception(spl_ce_InvalidArgumentException,
+            "Target path must be absolute (start with /)", 0);
+        RETURN_THROWS();
+    }
+
+    /* Security: Check for directory traversal sequences
+     * We look for /../ or /.. at end of path, not just ".." substring
+     * to avoid false positives on legitimate filenames containing ".."
+     */
+    const char *path_str = ZSTR_VAL(target_path);
+    const char *traverse_check = path_str;
+    while ((traverse_check = strstr(traverse_check, "/../")) != NULL) {
+        zend_throw_exception(spl_ce_InvalidArgumentException,
+            "Invalid target path: contains directory traversal", 0);
+        RETURN_THROWS();
+    }
+    /* Also check for trailing /.. */
+    size_t path_len = ZSTR_LEN(target_path);
+    if (path_len >= 3 && strcmp(path_str + path_len - 3, "/..") == 0) {
         zend_throw_exception(spl_ce_InvalidArgumentException,
             "Invalid target path: contains directory traversal", 0);
         RETURN_THROWS();
     }
 
-    /* Check if target directory is writable - safely */
+    /* Extract target directory and validate with realpath()
+     * This resolves symlinks and ensures the directory exists */
     char *target_dir = NULL;
     char *last_slash = NULL;
+    char resolved_dir[PATH_MAX];
 
     target_dir = estrndup(ZSTR_VAL(target_path), ZSTR_LEN(target_path));
-    if (target_dir) {
-        last_slash = strrchr(target_dir, '/');
-        if (last_slash) {
-            *last_slash = '\0';
-            if (access(target_dir, W_OK) != 0) {
-                efree(target_dir);
-                zend_throw_exception(spl_ce_RuntimeException,
-                    "Target directory is not writable", 0);
-                RETURN_THROWS();
-            }
-        }
-        efree(target_dir);
+    if (!target_dir) {
+        zend_throw_exception(spl_ce_RuntimeException,
+            "Memory allocation failed", 0);
+        RETURN_THROWS();
     }
+
+    last_slash = strrchr(target_dir, '/');
+    if (last_slash && last_slash != target_dir) {
+        *last_slash = '\0';
+
+        /* Use realpath() to get canonical directory path
+         * This resolves symlinks and ./ sequences */
+        if (realpath(target_dir, resolved_dir) == NULL) {
+            efree(target_dir);
+            zend_throw_exception(spl_ce_RuntimeException,
+                "Target directory does not exist or is not accessible", 0);
+            RETURN_THROWS();
+        }
+
+        /* Check if directory is writable */
+        if (access(resolved_dir, W_OK) != 0) {
+            efree(target_dir);
+            zend_throw_exception(spl_ce_RuntimeException,
+                "Target directory is not writable", 0);
+            RETURN_THROWS();
+        }
+    } else if (last_slash == target_dir) {
+        /* Path is in root directory like /filename */
+        if (access("/", W_OK) != 0) {
+            efree(target_dir);
+            zend_throw_exception(spl_ce_RuntimeException,
+                "Root directory is not writable", 0);
+            RETURN_THROWS();
+        }
+    }
+    efree(target_dir);
 
     /* Check tmp_name */
     if (!intern->tmp_name || ZSTR_LEN(intern->tmp_name) == 0) {

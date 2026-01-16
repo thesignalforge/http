@@ -59,7 +59,7 @@ static size_t write_callback(void *ptr, size_t size, size_t nmemb, void *userdat
             new_capacity = ctx->response_body_len + total_size + 4096;
         }
 
-        char *new_body = realloc(ctx->response_body, new_capacity);
+        char *new_body = erealloc(ctx->response_body, new_capacity);
         if (!new_body) {
             return 0;
         }
@@ -85,7 +85,7 @@ static size_t header_callback(void *ptr, size_t size, size_t nmemb, void *userda
             new_capacity = ctx->response_headers_len + total_size + 1024;
         }
 
-        char *new_headers = realloc(ctx->response_headers, new_capacity);
+        char *new_headers = erealloc(ctx->response_headers, new_capacity);
         if (!new_headers) {
             return 0;
         }
@@ -125,7 +125,7 @@ void signalforge_curl_parse_headers(signalforge_curl_context_t *ctx) {
         return;
     }
 
-    ctx->response->headers = malloc(sizeof(signalforge_client_header_t) * header_count);
+    ctx->response->headers = emalloc(sizeof(signalforge_client_header_t) * header_count);
     if (!ctx->response->headers) {
         return;
     }
@@ -140,7 +140,7 @@ void signalforge_curl_parse_headers(signalforge_curl_context_t *ctx) {
         char *colon = memchr(ptr, ':', line_end - ptr);
         if (colon) {
             size_t name_len = colon - ptr;
-            char *name = malloc(name_len + 1);
+            char *name = emalloc(name_len + 1);
             if (name) {
                 memcpy(name, ptr, name_len);
                 name[name_len] = '\0';
@@ -159,7 +159,7 @@ void signalforge_curl_parse_headers(signalforge_curl_context_t *ctx) {
                     value_len--;
                 }
 
-                char *value = malloc(value_len + 1);
+                char *value = emalloc(value_len + 1);
                 if (value) {
                     memcpy(value, value_start, value_len);
                     value[value_len] = '\0';
@@ -168,7 +168,7 @@ void signalforge_curl_parse_headers(signalforge_curl_context_t *ctx) {
                     ctx->response->headers[idx].value = value;
                     idx++;
                 } else {
-                    free(name);
+                    efree(name);
                 }
             }
         }
@@ -285,13 +285,13 @@ int signalforge_curl_setup(
         for (size_t i = 0; i < ctx->request->header_count; i++) {
             size_t header_len = strlen(ctx->request->headers[i].name) +
                                strlen(ctx->request->headers[i].value) + 3;
-            char *header = malloc(header_len);
+            char *header = emalloc(header_len);
             if (header) {
                 snprintf(header, header_len, "%s: %s",
                         ctx->request->headers[i].name,
                         ctx->request->headers[i].value);
                 list = curl_slist_append(list, header);
-                free(header);
+                efree(header);
             }
         }
         if (list) {
@@ -364,13 +364,17 @@ void signalforge_curl_cleanup_context(signalforge_curl_context_t *ctx) {
         ctx->header_list = NULL;
     }
 
-    free(ctx->response_body);
-    ctx->response_body = NULL;
+    if (ctx->response_body) {
+        efree(ctx->response_body);
+        ctx->response_body = NULL;
+    }
     ctx->response_body_len = 0;
     ctx->response_body_capacity = 0;
 
-    free(ctx->response_headers);
-    ctx->response_headers = NULL;
+    if (ctx->response_headers) {
+        efree(ctx->response_headers);
+        ctx->response_headers = NULL;
+    }
     ctx->response_headers_len = 0;
     ctx->response_headers_capacity = 0;
 
@@ -421,13 +425,13 @@ signalforge_client_response_t *signalforge_curl_easy_execute(
 
     /* Allocate response buffers */
     ctx.response_body_capacity = 4096;
-    ctx.response_body = malloc(ctx.response_body_capacity);
+    ctx.response_body = emalloc(ctx.response_body_capacity);
     ctx.response_headers_capacity = 1024;
-    ctx.response_headers = malloc(ctx.response_headers_capacity);
+    ctx.response_headers = emalloc(ctx.response_headers_capacity);
 
     if (!ctx.response_body || !ctx.response_headers) {
-        free(ctx.response_body);
-        free(ctx.response_headers);
+        if (ctx.response_body) efree(ctx.response_body);
+        if (ctx.response_headers) efree(ctx.response_headers);
         signalforge_client_response_destroy(response);
         curl_easy_cleanup(curl);
         return NULL;
@@ -500,7 +504,7 @@ signalforge_client_response_t *signalforge_curl_easy_execute(
             retry_count++;
         } else {
             /* No retry - set error message */
-            response->error_message = strdup(curl_easy_strerror(result));
+            response->error_message = estrdup(curl_easy_strerror(result));
             break;
         }
 
