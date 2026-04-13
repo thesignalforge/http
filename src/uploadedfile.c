@@ -16,8 +16,21 @@
 #include "uploadedfile.h"
 #include "stream.h"
 #include <sys/stat.h>
+#ifdef PHP_WIN32
+#include <io.h>
+#define access _access
+#define W_OK 2
+#define R_OK 4
+#else
 #include <unistd.h>
+#endif
 #include <string.h>
+
+/* Upload error constants - avoid magic numbers */
+#ifndef UPLOAD_ERR_OK
+#define UPLOAD_ERR_OK        0
+#define UPLOAD_ERR_NO_FILE   4
+#endif
 
 /* ============================================================================
  * GLOBAL STATE
@@ -155,7 +168,7 @@ signalforge_uploadedfile_object *signalforge_uploadedfile_from_files_array(zval 
         intern->client_filename = NULL;
         intern->client_media_type = NULL;
         intern->size = 0;
-        intern->error = 4; /* UPLOAD_ERR_NO_FILE */
+        intern->error = UPLOAD_ERR_NO_FILE;
         return intern;
     }
 
@@ -216,11 +229,11 @@ signalforge_uploadedfile_object *signalforge_uploadedfile_from_files_array(zval 
             if (endptr != NULL && *endptr == '\0' && parsed_error >= 0 && parsed_error <= 8) {
                 intern->error = parsed_error;
             } else {
-                intern->error = 4; /* UPLOAD_ERR_NO_FILE */
+                intern->error = UPLOAD_ERR_NO_FILE;
             }
         }
     } else {
-        intern->error = 0; /* UPLOAD_ERR_OK */
+        intern->error = UPLOAD_ERR_OK;
     }
 
     return intern;
@@ -247,7 +260,7 @@ PHP_METHOD(Signalforge_Http_UploadedFile, create)
     signalforge_uploadedfile_object *intern;
     zval *stream_param;
     zend_long size = 0;
-    zend_bool size_is_null = 1;
+    bool size_is_null = 1;
     zend_long error = 0; /* UPLOAD_ERR_OK */
     zend_string *client_filename = NULL;
     zend_string *client_media_type = NULL;
@@ -327,9 +340,9 @@ PHP_METHOD(Signalforge_Http_UploadedFile, getStream)
     ZEND_PARSE_PARAMETERS_NONE();
 
     /* Check error first */
-    if (intern->error != 0) { /* UPLOAD_ERR_OK = 0 */
+    if (intern->error != UPLOAD_ERR_OK) {
         zend_throw_exception_ex(zend_ce_exception, 0,
-            "Cannot get stream: file upload error", intern->error);
+            "Cannot get stream: file upload error %ld", intern->error);
         RETURN_THROWS();
     }
 
@@ -365,6 +378,27 @@ PHP_METHOD(Signalforge_Http_UploadedFile, getStream)
     if (strstr(ZSTR_VAL(intern->tmp_name), "..") != NULL) {
         zend_throw_exception(spl_ce_RuntimeException,
             "Invalid file path: contains directory traversal", 0);
+        RETURN_THROWS();
+    }
+
+    /* Reject stream wrappers (php://, data://, http://, etc.) to prevent SSRF */
+    if (strstr(ZSTR_VAL(intern->tmp_name), "://") != NULL) {
+        zend_throw_exception(spl_ce_RuntimeException,
+            "Invalid file path: stream wrappers are not allowed", 0);
+        RETURN_THROWS();
+    }
+
+    /* Reject null bytes in path */
+    if (memchr(ZSTR_VAL(intern->tmp_name), '\0', ZSTR_LEN(intern->tmp_name)) != NULL) {
+        zend_throw_exception(spl_ce_RuntimeException,
+            "Invalid file path: contains null bytes", 0);
+        RETURN_THROWS();
+    }
+
+    /* Check open_basedir restriction */
+    if (php_check_open_basedir(ZSTR_VAL(intern->tmp_name))) {
+        zend_throw_exception(spl_ce_RuntimeException,
+            "open_basedir restriction in effect", 0);
         RETURN_THROWS();
     }
 
@@ -439,7 +473,7 @@ PHP_METHOD(Signalforge_Http_UploadedFile, moveTo)
     ZEND_PARSE_PARAMETERS_END();
 
     /* Check error first */
-    if (intern->error != 0) { /* UPLOAD_ERR_OK = 0 */
+    if (intern->error != UPLOAD_ERR_OK) {
         zend_throw_exception(spl_ce_RuntimeException,
             "Cannot move file: file upload error", 0);
         RETURN_THROWS();
@@ -456,6 +490,27 @@ PHP_METHOD(Signalforge_Http_UploadedFile, moveTo)
     if (strstr(ZSTR_VAL(target_path), "..") != NULL) {
         zend_throw_exception(spl_ce_InvalidArgumentException,
             "Invalid target path: contains directory traversal", 0);
+        RETURN_THROWS();
+    }
+
+    /* Reject stream wrappers in target path */
+    if (strstr(ZSTR_VAL(target_path), "://") != NULL) {
+        zend_throw_exception(spl_ce_InvalidArgumentException,
+            "Invalid target path: stream wrappers are not allowed", 0);
+        RETURN_THROWS();
+    }
+
+    /* Reject null bytes in path */
+    if (memchr(ZSTR_VAL(target_path), '\0', ZSTR_LEN(target_path)) != NULL) {
+        zend_throw_exception(spl_ce_InvalidArgumentException,
+            "Invalid target path: contains null bytes", 0);
+        RETURN_THROWS();
+    }
+
+    /* Check open_basedir restriction on target */
+    if (php_check_open_basedir(ZSTR_VAL(target_path))) {
+        zend_throw_exception(spl_ce_RuntimeException,
+            "open_basedir restriction in effect for target path", 0);
         RETURN_THROWS();
     }
 
@@ -485,8 +540,23 @@ PHP_METHOD(Signalforge_Http_UploadedFile, moveTo)
         RETURN_THROWS();
     }
 
-    /* Move file using rename() - atomic operation */
-    if (rename(ZSTR_VAL(intern->tmp_name), ZSTR_VAL(target_path)) != 0) {
+    /* Validate source path (tmp_name) for stream wrappers and traversal */
+    if (strstr(ZSTR_VAL(intern->tmp_name), "://") != NULL ||
+        strstr(ZSTR_VAL(intern->tmp_name), "..") != NULL) {
+        zend_throw_exception(spl_ce_RuntimeException,
+            "Invalid source file path", 0);
+        RETURN_THROWS();
+    }
+
+    /* Check open_basedir on source */
+    if (php_check_open_basedir(ZSTR_VAL(intern->tmp_name))) {
+        zend_throw_exception(spl_ce_RuntimeException,
+            "open_basedir restriction in effect for source path", 0);
+        RETURN_THROWS();
+    }
+
+    /* Move file using VCWD_RENAME for thread-safe virtual CWD support */
+    if (VCWD_RENAME(ZSTR_VAL(intern->tmp_name), ZSTR_VAL(target_path)) != 0) {
         zend_throw_exception(spl_ce_RuntimeException,
             "Failed to move uploaded file", 0);
         RETURN_THROWS();
@@ -638,6 +708,8 @@ void signalforge_uploadedfile_register_class(void)
     /* Set custom handlers */
     signalforge_uploadedfile_object_handlers.free_obj = signalforge_uploadedfile_free_object;
     signalforge_uploadedfile_object_handlers.offset = XtOffsetOf(signalforge_uploadedfile_object, std);
+    /* Disallow cloning - UploadedFile manages temp file ownership which cannot be safely shared */
+    signalforge_uploadedfile_object_handlers.clone_obj = NULL;
 
     /* Set custom object creation function */
     signalforge_uploadedfile_ce->create_object = signalforge_uploadedfile_create_object;
@@ -680,12 +752,51 @@ signalforge_uploadedfile_object *signalforge_uploadedfile_from_streamforge(
 
     /* Mark as from streamforge */
     intern->from_streamforge = 1;
-    intern->error = 0; /* UPLOAD_ERR_OK - streamforge already validated */
+    intern->error = UPLOAD_ERR_OK;
 
     /* Get temp file path (required) */
     snprintf(key, sizeof(key), "HTTP_X_UPLOAD_%d_PATH", index);
     val = zend_hash_str_find(server_ht, key, strlen(key));
     if (val && Z_TYPE_P(val) == IS_STRING && Z_STRLEN_P(val) > 0) {
+        /* Security: validate streamforge temp path */
+        const char *path = Z_STRVAL_P(val);
+        size_t path_len = Z_STRLEN_P(val);
+
+        /* Reject stream wrappers (prevents SSRF via php://, data://, http://, etc.) */
+        if (strstr(path, "://") != NULL) {
+            intern->tmp_name = NULL;
+            intern->error = UPLOAD_ERR_NO_FILE;
+            return intern;
+        }
+
+        /* Reject path traversal */
+        if (strstr(path, "..") != NULL) {
+            intern->tmp_name = NULL;
+            intern->error = UPLOAD_ERR_NO_FILE;
+            return intern;
+        }
+
+        /* Reject null bytes */
+        if (memchr(path, '\0', path_len) != NULL) {
+            intern->tmp_name = NULL;
+            intern->error = UPLOAD_ERR_NO_FILE;
+            return intern;
+        }
+
+        /* Path must be absolute */
+        if (path[0] != '/') {
+            intern->tmp_name = NULL;
+            intern->error = UPLOAD_ERR_NO_FILE;
+            return intern;
+        }
+
+        /* Check open_basedir restriction early */
+        if (php_check_open_basedir(path)) {
+            intern->tmp_name = NULL;
+            intern->error = UPLOAD_ERR_NO_FILE;
+            return intern;
+        }
+
         intern->tmp_name = zend_string_copy(Z_STR_P(val));
 
         /* Register for cleanup tracking */
@@ -698,7 +809,7 @@ signalforge_uploadedfile_object *signalforge_uploadedfile_from_streamforge(
     } else {
         /* No path - upload error */
         intern->tmp_name = NULL;
-        intern->error = 4; /* UPLOAD_ERR_NO_FILE */
+        intern->error = UPLOAD_ERR_NO_FILE;
         return intern;
     }
 

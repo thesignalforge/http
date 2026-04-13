@@ -26,10 +26,10 @@ typedef struct _signalforge_uploadedfile_object {
 
     /* Stream (lazy-loaded) */
     zval zv_stream;                 // StreamInterface object (lazy-loaded)
-    zend_bool stream_loaded;        // Flag to track if stream was created
+    bool stream_loaded;        // Flag to track if stream was created
 
     /* Streamforge integration */
-    zend_bool from_streamforge;     // True if file came from streamforge proxy
+    bool from_streamforge;     // True if file came from streamforge proxy
     int streamforge_index;          // Index in globals temp_paths array (-1 if N/A)
 
     /* Standard zend_object MUST be last member */

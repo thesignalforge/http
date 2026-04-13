@@ -19,6 +19,7 @@ extern zend_class_entry *psr7_response_interface_ce;
 extern zend_class_entry *psr7_stream_interface_ce;
 extern zend_class_entry *psr7_uploadedfile_interface_ce;
 extern zend_class_entry *psr7_serverrequest_interface_ce;
+extern zend_class_entry *psr7_uri_interface_ce;
 
 /* ============================================================================
  * INTERFACE REGISTRATION FUNCTION

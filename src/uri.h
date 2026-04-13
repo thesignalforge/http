@@ -64,7 +64,7 @@ void signalforge_uri_register_class(void);
 int signalforge_parse_uri(const char *uri, size_t len, signalforge_uri_object *result);
 
 /* Check if port is standard for the given scheme */
-static inline zend_bool signalforge_is_standard_port(zend_string *scheme, zend_long port)
+static inline bool signalforge_is_standard_port(zend_string *scheme, zend_long port)
 {
     if (port == SIGNALFORGE_PORT_UNSET) {
         return 1; /* Not specified = standard */

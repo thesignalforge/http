@@ -16,7 +16,12 @@
 
 #include "php_signalforge_http.h"
 #include "src/psr7_interfaces.h"
+#ifdef PHP_WIN32
+#include <io.h>
+#define unlink _unlink
+#else
 #include <unistd.h>  /* For unlink() */
+#endif
 #include "src/request.h"
 #include "src/response.h"
 #include "src/stream.h"
@@ -56,13 +61,23 @@ PHP_MINFO_FUNCTION(signalforge_http)
  * MODULE LIFECYCLE
  * ============================================================================ */
 
-/* GINIT/GSHUTDOWN not needed - no meaningful globals to initialize */
+/* GINIT - zero-initialize module globals for defense-in-depth */
+static PHP_GINIT_FUNCTION(signalforge_http)
+{
+#if defined(COMPILE_DL_SIGNALFORGE_HTTP) && defined(ZTS)
+    ZEND_TSRMLS_CACHE_UPDATE();
+#endif
+    memset(signalforge_http_globals, 0, sizeof(*signalforge_http_globals));
+}
 
 PHP_MINIT_FUNCTION(signalforge_http)
 {
 #ifdef ZTS
     ZEND_TSRMLS_CACHE_UPDATE();
 #endif
+
+    /* Register PSR-7 interfaces FIRST - classes depend on them */
+    signalforge_register_psr7_interfaces();
 
     /* Register classes */
     signalforge_uri_register_class();  /* Uri first - Request depends on it */
@@ -148,7 +163,7 @@ zend_module_entry signalforge_http_module_entry = {
     PHP_MINFO(signalforge_http),
     PHP_SIGNALFORGE_HTTP_VERSION,
     PHP_MODULE_GLOBALS(signalforge_http),
-    NULL,  /* No GINIT needed */
+    PHP_GINIT(signalforge_http),
     NULL,  /* No GSHUTDOWN needed */
     NULL,
     STANDARD_MODULE_PROPERTIES_EX

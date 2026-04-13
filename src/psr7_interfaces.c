@@ -24,6 +24,7 @@ zend_class_entry *psr7_response_interface_ce = NULL;
 zend_class_entry *psr7_stream_interface_ce = NULL;
 zend_class_entry *psr7_uploadedfile_interface_ce = NULL;
 zend_class_entry *psr7_serverrequest_interface_ce = NULL;
+zend_class_entry *psr7_uri_interface_ce = NULL;
 
 /* ============================================================================
  * INTERFACE LOOKUP AND IMPLEMENTATION
@@ -62,4 +63,8 @@ void signalforge_register_psr7_interfaces(void)
     INIT_NS_CLASS_ENTRY(ce, "Psr\\Http\\Message", "ServerRequestInterface", NULL);
     psr7_serverrequest_interface_ce = zend_register_internal_interface(&ce);
     zend_class_implements(psr7_serverrequest_interface_ce, 1, psr7_request_interface_ce);
+
+    /* Register UriInterface */
+    INIT_NS_CLASS_ENTRY(ce, "Psr\\Http\\Message", "UriInterface", NULL);
+    psr7_uri_interface_ce = zend_register_internal_interface(&ce);
 }
