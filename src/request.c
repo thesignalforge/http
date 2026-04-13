@@ -197,10 +197,10 @@ HashTable *signalforge_extract_headers(HashTable *server)
             }
             /* Handle special headers without HTTP_ prefix */
             else if (zend_string_equals_literal(key, "CONTENT_TYPE")) {
-                normalized = zend_string_init_interned("content-type", sizeof("content-type") - 1, 1);
+                normalized = zend_string_init("content-type", sizeof("content-type") - 1, 0);
             }
             else if (zend_string_equals_literal(key, "CONTENT_LENGTH")) {
-                normalized = zend_string_init_interned("content-length", sizeof("content-length") - 1, 1);
+                normalized = zend_string_init("content-length", sizeof("content-length") - 1, 0);
             }
             
             if (normalized) {
@@ -459,7 +459,7 @@ HashTable *signalforge_merge_input(signalforge_request_object *intern)
 
     /* Priority 1: JSON body (highest priority for API requests) */
     signalforge_parse_content_type(intern);
-    if (!Z_ISNULL(intern->zv_content_type) &&
+    if (Z_TYPE(intern->zv_content_type) == IS_STRING &&
         strcasecmp(Z_STRVAL(intern->zv_content_type), "application/json") == 0) {
 
         /* Parse JSON if not already done - reuse cached result from getParsedBody() */
@@ -538,7 +538,7 @@ zval *signalforge_hash_get(HashTable *ht, const char *key, size_t key_len)
 /**
  * Clone headers HashTable for immutability
  */
-static HashTable *signalforge_clone_headers(HashTable *src)
+HashTable *signalforge_clone_headers(HashTable *src)
 {
     HashTable *dst;
     zend_string *key;
@@ -554,8 +554,8 @@ static HashTable *signalforge_clone_headers(HashTable *src)
     zend_hash_init(dst, zend_hash_num_elements(src), NULL, ZVAL_PTR_DTOR, 0);
 
     ZEND_HASH_FOREACH_STR_KEY_VAL(src, key, val) {
-        Z_TRY_ADDREF_P(val);
         if (key) {
+            Z_TRY_ADDREF_P(val);
             zend_hash_add(dst, key, val);
         }
     } ZEND_HASH_FOREACH_END();
@@ -647,9 +647,12 @@ signalforge_request_object *signalforge_request_clone(signalforge_request_object
  * is initialized if not already present. This provides ~10x faster access than
  * using PHP's $GLOBALS or direct variable access.
  */
-#define signalforge_get_superglobal(name, name_len) \
-    ({ zend_is_auto_global_str((name), (name_len)); \
-       zend_hash_str_find(&EG(symbol_table), (name), (name_len)); })
+/* Portable superglobal accessor (no GCC statement-expression) */
+static inline zval *signalforge_get_superglobal(const char *name, size_t name_len)
+{
+    zend_is_auto_global_str(name, name_len);
+    return zend_hash_str_find(&EG(symbol_table), name, name_len);
+}
 
 /* ============================================================================
  * PSR-7 METHOD IMPLEMENTATIONS
@@ -852,7 +855,7 @@ PHP_METHOD(Signalforge_Http_Request, create)
     /* Validate HTTP method */
     const char *method_str = ZSTR_VAL(method);
     size_t method_len = ZSTR_LEN(method);
-    zend_bool valid = 0;
+    bool valid = 0;
 
     if (method_len == 3) {
         if (strncasecmp(method_str, "GET", 3) == 0) valid = 1;
@@ -999,11 +1002,14 @@ PHP_METHOD(Signalforge_Http_Request, withProtocolVersion)
         Z_PARAM_STR(version)
     ZEND_PARSE_PARAMETERS_END();
     
-    /* Validate protocol version */
-    if (!zend_string_equals_literal(version, "1.0") && 
-        !zend_string_equals_literal(version, "1.1")) {
+    /* Validate protocol version - accept common HTTP protocol versions */
+    if (!zend_string_equals_literal(version, "1.0") &&
+        !zend_string_equals_literal(version, "1.1") &&
+        !zend_string_equals_literal(version, "2") &&
+        !zend_string_equals_literal(version, "2.0") &&
+        !zend_string_equals_literal(version, "3")) {
         zend_throw_exception(spl_ce_InvalidArgumentException,
-            "Protocol version must be '1.0' or '1.1'", 0);
+            "Protocol version must be '1.0', '1.1', '2', '2.0', or '3'", 0);
         RETURN_THROWS();
     }
     
@@ -1053,19 +1059,17 @@ PHP_METHOD(Signalforge_Http_Request, hasHeader)
 {
     zend_string *name;
     signalforge_request_object *intern = Z_SIGNALFORGE_REQUEST_P(ZEND_THIS);
-    char normalized_name[256];
-    size_t normalized_len;
-    
+
     ZEND_PARSE_PARAMETERS_START(1, 1)
         Z_PARAM_STR(name)
     ZEND_PARSE_PARAMETERS_END();
-    
+
     if (!intern->ht_headers) {
         RETURN_FALSE;
     }
-    
+
     zend_string *normalized = signalforge_normalize_header_name(ZSTR_VAL(name), ZSTR_LEN(name));
-    zend_bool exists = zend_hash_exists(intern->ht_headers, normalized);
+    bool exists = zend_hash_exists(intern->ht_headers, normalized);
     zend_string_release(normalized);
     RETURN_BOOL(exists);
 }
@@ -1161,15 +1165,13 @@ PHP_METHOD(Signalforge_Http_Request, withHeader)
     zend_string *name;
     zval *value;
     signalforge_request_object *src, *dst;
-    char normalized_name[256];
-    size_t normalized_len;
     zval header_val;
-    
+
     ZEND_PARSE_PARAMETERS_START(2, 2)
         Z_PARAM_STR(name)
         Z_PARAM_ZVAL(value)
     ZEND_PARSE_PARAMETERS_END();
-    
+
     /* Validate header name */
     if (!signalforge_validate_header_name(ZSTR_VAL(name), ZSTR_LEN(name))) {
         zend_throw_exception_ex(spl_ce_InvalidArgumentException, 0, "Invalid header name '%s'", ZSTR_VAL(name));
@@ -1197,7 +1199,7 @@ PHP_METHOD(Signalforge_Http_Request, withHeader)
 
     /* Normalize header name */
     zend_string *normalized = signalforge_normalize_header_name(ZSTR_VAL(name), ZSTR_LEN(name));
-    
+
     /* Normalize value to array */
     if (Z_TYPE_P(value) == IS_ARRAY) {
         ZVAL_COPY(&header_val, value);
@@ -1228,15 +1230,13 @@ PHP_METHOD(Signalforge_Http_Request, withAddedHeader)
     zend_string *name;
     zval *value;
     signalforge_request_object *src, *dst;
-    char normalized_name[256];
-    size_t normalized_len;
     zval *existing_val;
-    
+
     ZEND_PARSE_PARAMETERS_START(2, 2)
         Z_PARAM_STR(name)
         Z_PARAM_ZVAL(value)
     ZEND_PARSE_PARAMETERS_END();
-    
+
     if (!signalforge_validate_header_name(ZSTR_VAL(name), ZSTR_LEN(name))) {
         zend_throw_exception_ex(spl_ce_InvalidArgumentException, 0, "Invalid header name '%s'", ZSTR_VAL(name));
         RETURN_THROWS();
@@ -1303,14 +1303,23 @@ PHP_METHOD(Signalforge_Http_Request, withAddedHeader)
         }
     }
 
-    /* Add new value */
-    zval val_copy;
-    ZVAL_COPY(&val_copy, value);
-    add_next_index_zval(&header_array, &val_copy);
+    /* Add new value(s) - flatten arrays for PSR-7 compliance */
+    if (Z_TYPE_P(value) == IS_ARRAY) {
+        zval *item;
+        ZEND_HASH_FOREACH_VAL(Z_ARRVAL_P(value), item) {
+            zval item_copy;
+            ZVAL_COPY(&item_copy, item);
+            add_next_index_zval(&header_array, &item_copy);
+        } ZEND_HASH_FOREACH_END();
+    } else {
+        zval val_copy;
+        ZVAL_COPY(&val_copy, value);
+        add_next_index_zval(&header_array, &val_copy);
+    }
 
     /* Update headers */
     zend_hash_update(dst->ht_headers, normalized, &header_array);
-    
+
     zend_string_release(normalized);
 }
 /* }}} */
@@ -1362,9 +1371,10 @@ PHP_METHOD(Signalforge_Http_Request, getBody)
     /* Read body if not already read */
     body_str = signalforge_read_body(intern);
 
-    /* Create Stream from body string using static method */
-    ZVAL_STR(&body_zv, body_str);
+    /* Create Stream from body string - ZVAL_STR_COPY for proper addref on borrowed string */
+    ZVAL_STR_COPY(&body_zv, body_str);
     zend_call_method(NULL, signalforge_stream_ce, NULL, "fromstring", sizeof("fromstring")-1, &stream_zv, 1, &body_zv, NULL);
+    zval_ptr_dtor(&body_zv);
 
     if (Z_TYPE(stream_zv) == IS_OBJECT) {
         RETURN_ZVAL(&stream_zv, 0, 0);
@@ -1374,6 +1384,7 @@ PHP_METHOD(Signalforge_Http_Request, getBody)
     zval empty_zv;
     ZVAL_EMPTY_STRING(&empty_zv);
     zend_call_method(NULL, signalforge_stream_ce, NULL, "fromstring", sizeof("fromstring")-1, return_value, 1, &empty_zv, NULL);
+    zval_ptr_dtor(&empty_zv);
 }
 /* }}} */
 
@@ -1434,8 +1445,12 @@ PHP_METHOD(Signalforge_Http_Request, withRequestTarget)
     ZVAL_STR(&dst->zv_uri, zend_string_copy(target));
     dst->request_uri = Z_STRVAL(dst->zv_uri);
     dst->request_uri_len = Z_STRLEN(dst->zv_uri);
-    
-    /* Clear path cache */
+
+    /* Clear path cache - dtor old zv_path before re-parsing */
+    if (!Z_ISUNDEF(dst->zv_path)) {
+        zval_ptr_dtor(&dst->zv_path);
+        ZVAL_UNDEF(&dst->zv_path);
+    }
     dst->flags &= ~SF_REQ_FLAG_PATH_PARSED;
 }
 /* }}} */
@@ -1484,7 +1499,7 @@ PHP_METHOD(Signalforge_Http_Request, withMethod)
     /* Validate against RFC 7231 standard methods */
     const char *method_str = ZSTR_VAL(method);
     size_t method_len = ZSTR_LEN(method);
-    zend_bool valid = 0;
+    bool valid = 0;
     
     /* Case-insensitive comparison against standard methods */
     if (method_len == 3 && strncasecmp(method_str, "GET", 3) == 0) valid = 1;
@@ -1598,7 +1613,7 @@ PHP_METHOD(Signalforge_Http_Request, getUri)
 PHP_METHOD(Signalforge_Http_Request, withUri)
 {
     zval *uri;
-    zend_bool preserve_host = 0;
+    bool preserve_host = 0;
     signalforge_request_object *src, *dst;
     zend_string *uri_str = NULL;
     signalforge_uri_object *uri_obj = NULL;
@@ -1743,7 +1758,11 @@ PHP_METHOD(Signalforge_Http_Request, withUri)
         }
     }
 
-    /* Clear path cache */
+    /* Clear path cache - dtor old zv_path before re-parsing */
+    if (!Z_ISUNDEF(dst->zv_path)) {
+        zval_ptr_dtor(&dst->zv_path);
+        ZVAL_UNDEF(&dst->zv_path);
+    }
     dst->flags &= ~SF_REQ_FLAG_PATH_PARSED;
 
     zend_string_release(uri_str);
@@ -1755,7 +1774,7 @@ PHP_METHOD(Signalforge_Http_Request, withUri)
  * ============================================================================ */
 
 /* Validate that array doesn't contain nested arrays */
-static zend_bool signalforge_validate_flat_array(zval *array)
+static bool signalforge_validate_flat_array(zval *array)
 {
     if (Z_TYPE_P(array) != IS_ARRAY) {
         return 0;
@@ -1917,7 +1936,11 @@ PHP_METHOD(Signalforge_Http_Request, getUploadedFiles)
             if (Z_TYPE_P(file_count_zv) == IS_LONG) {
                 count = (int)Z_LVAL_P(file_count_zv);
             } else if (Z_TYPE_P(file_count_zv) == IS_STRING) {
-                count = atoi(Z_STRVAL_P(file_count_zv));
+                char *endptr = NULL;
+                zend_long parsed = ZEND_STRTOL(Z_STRVAL_P(file_count_zv), &endptr, 10);
+                if (endptr && *endptr == '\0' && parsed >= 0 && parsed <= SIGNALFORGE_MAX_STREAMFORGE_UPLOADS) {
+                    count = (int)parsed;
+                }
             }
 
             /* Mark streamforge as detected in globals */
@@ -2015,7 +2038,7 @@ PHP_METHOD(Signalforge_Http_Request, getParsedBody)
 
     /* Check if JSON body */
     signalforge_parse_content_type(intern);
-    if (!Z_ISNULL(intern->zv_content_type) &&
+    if (Z_TYPE(intern->zv_content_type) == IS_STRING &&
         strcasecmp(Z_STRVAL(intern->zv_content_type), "application/json") == 0) {
 
         /* Parse JSON if not already done */
@@ -2348,5 +2371,10 @@ void signalforge_request_register_class(void)
     signalforge_request_object_handlers.offset = XtOffsetOf(signalforge_request_object, std);
     signalforge_request_object_handlers.free_obj = signalforge_request_free_object;
     signalforge_request_object_handlers.clone_obj = signalforge_request_clone_obj;
+
+    /* Implement PSR-7 interfaces */
+    if (psr7_serverrequest_interface_ce) {
+        zend_class_implements(signalforge_request_ce, 1, psr7_serverrequest_interface_ce);
+    }
 }
 

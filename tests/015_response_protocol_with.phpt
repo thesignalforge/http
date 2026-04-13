@@ -24,11 +24,11 @@ $response2 = $response->withProtocolVersion('2.0');
 var_dump($response2->getProtocolVersion() === '2.0');
 var_dump($response->getProtocolVersion() === '1.1');
 
-// ACT: Change protocol version to 3.0
-$response3 = $response->withProtocolVersion('3.0');
+// ACT: Change protocol version to 3
+$response3 = $response->withProtocolVersion('3');
 
-// ASSERT: Protocol version changed to 3.0
-var_dump($response3->getProtocolVersion() === '3.0');
+// ASSERT: Protocol version changed to 3
+var_dump($response3->getProtocolVersion() === '3');
 ?>
 --EXPECT--
 bool(true)

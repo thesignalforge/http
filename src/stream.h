@@ -23,13 +23,13 @@ typedef struct _signalforge_stream_object {
     zend_long size;
     
     /* Capabilities */
-    zend_bool readable;
-    zend_bool writable;
-    zend_bool seekable;
+    bool readable;
+    bool writable;
+    bool seekable;
     
     /* Metadata cache */
     HashTable *ht_metadata;             // OWNED, must be freed
-    zend_bool metadata_loaded;
+    bool metadata_loaded;
     
     /* Standard zend_object MUST be last */
     zend_object std;

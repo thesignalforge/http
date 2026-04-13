@@ -100,7 +100,8 @@ void signalforge_parse_content_type(signalforge_request_object *intern);
 HashTable *signalforge_merge_input(signalforge_request_object *intern);
 zval *signalforge_hash_get(HashTable *ht, const char *key, size_t key_len);
 signalforge_request_object *signalforge_request_clone(signalforge_request_object *src, zval *return_value);
-zend_bool signalforge_validate_header_name(const char *name, size_t len);
+bool signalforge_validate_header_name(const char *name, size_t len);
+HashTable *signalforge_clone_headers(HashTable *src);
 
 #endif /* SIGNALFORGE_REQUEST_H */
 

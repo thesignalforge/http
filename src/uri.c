@@ -9,6 +9,7 @@
  */
 
 #include "uri.h"
+#include "psr7_interfaces.h"
 #include "ext/spl/spl_exceptions.h"
 #include "zend_smart_str.h"
 #include <ctype.h>
@@ -17,7 +18,7 @@
  * CLASS ENTRY AND HANDLERS
  * ============================================================================ */
 
-zend_class_entry *signalforge_uri_ce;
+zend_class_entry *signalforge_uri_ce = NULL;
 static zend_object_handlers signalforge_uri_handlers;
 
 /* ============================================================================
@@ -257,7 +258,7 @@ int signalforge_parse_uri(const char *uri, size_t len, signalforge_uri_object *r
         /* Parse port */
         if (port_start && port_start < authority_end) {
             char *port_end_ptr;
-            long port_val = strtol(port_start, &port_end_ptr, 10);
+            zend_long port_val = ZEND_STRTOL(port_start, &port_end_ptr, 10);
             if (port_end_ptr > port_start && port_val >= 0 && port_val <= 65535) {
                 result->port = port_val;
             } else {
@@ -728,7 +729,7 @@ PHP_METHOD(Signalforge_Http_Uri, withHost)
 PHP_METHOD(Signalforge_Http_Uri, withPort)
 {
     zend_long port;
-    zend_bool port_is_null = 0;
+    bool port_is_null = 0;
     signalforge_uri_object *src, *dst;
 
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -1022,4 +1023,9 @@ void signalforge_uri_register_class(void)
 
     /* Implement Stringable interface */
     zend_class_implements(signalforge_uri_ce, 1, zend_ce_stringable);
+
+    /* Implement PSR-7 UriInterface */
+    if (psr7_uri_interface_ce) {
+        zend_class_implements(signalforge_uri_ce, 1, psr7_uri_interface_ce);
+    }
 }

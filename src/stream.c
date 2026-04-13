@@ -63,8 +63,10 @@ static void signalforge_stream_free_object(zend_object *object)
 {
     signalforge_stream_object *intern = signalforge_stream_from_obj(object);
 
-    /* Release resource */
-    zval_ptr_dtor(&intern->zv_resource);
+    /* Release resource - guard against UNDEF for consistency */
+    if (!Z_ISUNDEF(intern->zv_resource)) {
+        zval_ptr_dtor(&intern->zv_resource);
+    }
 
     /* Release string data (zero-copy reference) */
     if (intern->string_data) {
@@ -85,16 +87,21 @@ static void signalforge_stream_free_object(zend_object *object)
  * INTERNAL HELPERS
  * ============================================================================ */
 
-/* Inlined for maximum performance */
-#define signalforge_get_php_stream(intern) \
-    ((intern)->string_data ? NULL : \
-     (Z_TYPE((intern)->zv_resource) == IS_RESOURCE ? \
-      ({ php_stream *stream = NULL; \
-         if (zend_fetch_resource2(Z_RES((intern)->zv_resource), "stream", php_file_le_stream(), php_file_le_pstream()) != NULL) { \
-           php_stream_from_zval_no_verify(stream, &(intern)->zv_resource); \
-         } \
-         stream; }) : \
-      NULL))
+/* Portable helper to extract php_stream from intern (no GCC extensions) */
+static inline php_stream *signalforge_get_php_stream_fn(signalforge_stream_object *intern)
+{
+    if (intern->string_data) {
+        return NULL;
+    }
+    if (Z_TYPE(intern->zv_resource) == IS_RESOURCE) {
+        /* Single lookup: zend_fetch_resource2 returns the resource data directly */
+        return (php_stream *)zend_fetch_resource2(
+            Z_RES(intern->zv_resource), "stream",
+            php_file_le_stream(), php_file_le_pstream());
+    }
+    return NULL;
+}
+#define signalforge_get_php_stream(intern) signalforge_get_php_stream_fn(intern)
 
 /* Inlined for maximum performance */
 #define signalforge_stream_is_closed(intern) \
@@ -131,13 +138,13 @@ void signalforge_load_metadata(signalforge_stream_object *intern)
         zval size_zv, mode_zv;
         ZVAL_LONG(&size_zv, ZSTR_LEN(intern->string_data));
         /* Use interned strings for common metadata keys to avoid allocations */
-        zend_string *size_key = zend_string_init_interned("size", sizeof("size")-1, 1);
+        zend_string *size_key = zend_string_init("size", sizeof("size")-1, 0);
         zend_hash_add(intern->ht_metadata, size_key, &size_zv);
         zend_string_release(size_key);
 
         /* Add mode for compatibility with tests */
         ZVAL_STRING(&mode_zv, "rb");
-        zend_string *mode_key = zend_string_init_interned("mode", sizeof("mode")-1, 1);
+        zend_string *mode_key = zend_string_init("mode", sizeof("mode")-1, 0);
         zend_hash_add(intern->ht_metadata, mode_key, &mode_zv);
         zend_string_release(mode_key);
 
@@ -162,7 +169,7 @@ void signalforge_load_metadata(signalforge_stream_object *intern)
             /* Fallback: add basic metadata */
             zval mode_zv;
             ZVAL_STRING(&mode_zv, "r+");
-            zend_string *mode_key = zend_string_init_interned("mode", sizeof("mode")-1, 1);
+            zend_string *mode_key = zend_string_init("mode", sizeof("mode")-1, 0);
             zend_hash_update(intern->ht_metadata, mode_key, &mode_zv);
             zend_string_release(mode_key);
         }
@@ -220,7 +227,11 @@ PHP_METHOD(Signalforge_Http_Stream, read)
 
     /* String-based stream */
     if (intern->string_data) {
-        size_t available = ZSTR_LEN(intern->string_data) - intern->position;
+        /* Guard against position beyond end (valid after seek() past end) */
+        if (intern->position >= (zend_long)ZSTR_LEN(intern->string_data)) {
+            RETURN_EMPTY_STRING();
+        }
+        size_t available = ZSTR_LEN(intern->string_data) - (size_t)intern->position;
         size_t read_len = (size_t)length < available ? (size_t)length : available;
 
         if (read_len == 0) {
@@ -293,7 +304,11 @@ PHP_METHOD(Signalforge_Http_Stream, getContents)
 
     /* String-based stream */
     if (intern->string_data) {
-        size_t available = ZSTR_LEN(intern->string_data) - intern->position;
+        /* Guard against position beyond end (valid after seek() past end) */
+        if (intern->position >= (zend_long)ZSTR_LEN(intern->string_data)) {
+            RETURN_EMPTY_STRING();
+        }
+        size_t available = ZSTR_LEN(intern->string_data) - (size_t)intern->position;
         if (available == 0) {
             RETURN_EMPTY_STRING();
         }
@@ -810,8 +825,8 @@ PHP_METHOD(Signalforge_Http_Stream, detach)
 
             RETURN_ZVAL(&resource_copy, 0, 0);
         }
-        /* Resource is invalid (closed) - clear and return NULL */
-        /* Clear the zval without calling dtor on invalid resource */
+        /* Resource is invalid (closed) - release and return NULL */
+        zval_ptr_dtor(&intern->zv_resource);
         ZVAL_UNDEF(&intern->zv_resource);
         intern->readable = 0;
         intern->writable = 0;
@@ -989,7 +1004,7 @@ PHP_METHOD(Signalforge_Http_Stream, fromResource)
     
     /* Determine capabilities and size */
     php_stream_statbuf ssb;
-    zend_bool is_seekable = 0;
+    bool is_seekable = 0;
     if (php_stream_stat(stream, &ssb) == 0) {
         intern->size = ssb.sb.st_size;
         /* Regular files are seekable */
@@ -1063,7 +1078,7 @@ PHP_METHOD(Signalforge_Http_Stream, fromFile)
 {
     zend_string *path;
     zend_string *mode = NULL;
-    zend_bool mode_allocated = 0;
+    bool mode_allocated = 0;
     signalforge_stream_object *intern;
     php_stream *stream;
     zval resource_zv;
@@ -1255,5 +1270,6 @@ void signalforge_stream_register_class(void)
     memcpy(&signalforge_stream_object_handlers, zend_get_std_object_handlers(), sizeof(zend_object_handlers));
     signalforge_stream_object_handlers.offset = XtOffsetOf(signalforge_stream_object, std);
     signalforge_stream_object_handlers.free_obj = signalforge_stream_free_object;
-
+    /* Disallow cloning - Stream manages resource/string ownership that cannot be safely shared */
+    signalforge_stream_object_handlers.clone_obj = NULL;
 }

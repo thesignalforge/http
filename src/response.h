@@ -25,7 +25,7 @@ typedef struct _signalforge_response_object {
     
     /* Body */
     zval zv_body;                       // StreamInterface object or string
-    zend_bool body_is_stream;           // Track if body is a stream
+    bool body_is_stream;           // Track if body is a stream
     
     /* Protocol version */
     zend_string *protocol_version;      // "1.1" or "1.0"
@@ -60,9 +60,9 @@ void signalforge_response_register_class(void);
 const char *signalforge_get_reason_phrase(zend_long status_code);
 zend_string *signalforge_serialize_headers(HashTable *headers);
 signalforge_response_object *signalforge_response_clone(signalforge_response_object *src, zval *return_value);
-zend_bool signalforge_validate_header_name(const char *name, size_t len);
-zend_bool signalforge_validate_header_value(const char *value, size_t len);
-zend_bool signalforge_validate_status_code(zend_long code);
+bool signalforge_validate_header_name(const char *name, size_t len);
+bool signalforge_validate_header_value(const char *value, size_t len);
+bool signalforge_validate_status_code(zend_long code);
 zend_string *signalforge_normalize_header_name(const char *src, size_t src_len); // Shared with request.c
 
 #endif /* SIGNALFORGE_RESPONSE_H */

@@ -22,19 +22,25 @@ $request = Request::capture();
 // ASSERT: Default protocol version
 var_dump($request->getProtocolVersion() === '1.1');
 
-// ACT: Set valid protocol versions (Request class only accepts HTTP/1.0 and HTTP/1.1)
+// ACT: Set valid protocol versions (accepts common HTTP versions)
 $http10Request = $request->withProtocolVersion('1.0');
 $http11Request = $request->withProtocolVersion('1.1');
+$http2Request = $request->withProtocolVersion('2');
+$http20Request = $request->withProtocolVersion('2.0');
+$http3Request = $request->withProtocolVersion('3');
 
 // ASSERT: Valid protocol versions accepted
 var_dump($http10Request->getProtocolVersion() === '1.0');
 var_dump($http11Request->getProtocolVersion() === '1.1');
+var_dump($http2Request->getProtocolVersion() === '2');
+var_dump($http20Request->getProtocolVersion() === '2.0');
+var_dump($http3Request->getProtocolVersion() === '3');
 
 // ASSERT: Immutability maintained
 var_dump($request->getProtocolVersion() === '1.1');
 
 // ACT: Try invalid protocol versions (these should throw InvalidArgumentException)
-$invalidVersions = ['', '0.9', '2.0', '2.1', '3.1', 'http/1.1', 'HTTP/1.1'];
+$invalidVersions = ['', '0.9', '2.1', '3.1', 'http/1.1', 'HTTP/1.1'];
 
 foreach ($invalidVersions as $version) {
     try {
@@ -48,6 +54,8 @@ foreach ($invalidVersions as $version) {
 }
 ?>
 --EXPECT--
+bool(true)
+bool(true)
 bool(true)
 bool(true)
 bool(true)
