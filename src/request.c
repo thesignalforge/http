@@ -296,7 +296,13 @@ zend_string *signalforge_read_body(signalforge_request_object *intern)
         return Z_STR(intern->zv_body);
     }
 
-    body = php_stream_copy_to_mem(stream, PHP_STREAM_COPY_ALL, 0);
+    /* Bound the read at signalforge_http.max_body_size to prevent memory
+     * exhaustion from huge request bodies. 0 means unlimited. (audit H-H-4) */
+    {
+        zend_long limit = SIGNALFORGE_HTTP_G(max_body_size);
+        size_t maxlen = (limit > 0) ? (size_t)limit : PHP_STREAM_COPY_ALL;
+        body = php_stream_copy_to_mem(stream, maxlen, 0);
+    }
     php_stream_close(stream);
 
     if (body) {
@@ -1678,6 +1684,22 @@ PHP_METHOD(Signalforge_Http_Request, withUri)
         zend_throw_exception(spl_ce_InvalidArgumentException,
             "URI must be a UriInterface or string", 0);
         RETURN_THROWS();
+    }
+
+    /* Reject control characters that could be used for header injection
+     * by downstream HTTP clients. CR/LF terminate headers; NUL truncates
+     * strings in many C-based consumers. (audit M-H-2) */
+    {
+        const char *p = ZSTR_VAL(uri_str);
+        size_t n = ZSTR_LEN(uri_str);
+        for (size_t i = 0; i < n; i++) {
+            if (p[i] == '\r' || p[i] == '\n' || p[i] == '\0') {
+                zend_string_release(uri_str);
+                zend_throw_exception(spl_ce_InvalidArgumentException,
+                    "URI must not contain CR, LF, or NUL characters", 0);
+                RETURN_THROWS();
+            }
+        }
     }
 
     src = Z_SIGNALFORGE_REQUEST_P(ZEND_THIS);

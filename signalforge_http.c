@@ -32,6 +32,26 @@
 ZEND_DECLARE_MODULE_GLOBALS(signalforge_http)
 
 /* ============================================================================
+ * INI SETTINGS
+ *
+ * signalforge_http.max_body_size — bytes; 0 disables limit. Default 16 MiB.
+ * Caps every read of php://input or stream contents to prevent memory
+ * exhaustion from attacker-controlled body sizes. (audit H-H-4)
+ * ============================================================================ */
+
+PHP_INI_BEGIN()
+    STD_PHP_INI_ENTRY(
+        "signalforge_http.max_body_size",
+        "16777216",          /* 16 MiB */
+        PHP_INI_ALL,
+        OnUpdateLong,
+        max_body_size,
+        zend_signalforge_http_globals,
+        signalforge_http_globals
+    )
+PHP_INI_END()
+
+/* ============================================================================
  * (No global interned strings currently used)
  * ============================================================================ */
 
@@ -76,6 +96,8 @@ PHP_MINIT_FUNCTION(signalforge_http)
     ZEND_TSRMLS_CACHE_UPDATE();
 #endif
 
+    REGISTER_INI_ENTRIES();
+
     /* Register PSR-7 interfaces FIRST - classes depend on them */
     signalforge_register_psr7_interfaces();
 
@@ -91,6 +113,7 @@ PHP_MINIT_FUNCTION(signalforge_http)
 
 PHP_MSHUTDOWN_FUNCTION(signalforge_http)
 {
+    UNREGISTER_INI_ENTRIES();
     return SUCCESS;
 }
 

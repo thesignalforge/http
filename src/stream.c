@@ -333,12 +333,16 @@ PHP_METHOD(Signalforge_Http_Stream, getContents)
         RETURN_THROWS();
     }
 
-    /* Use php_stream_copy_to_mem for better performance than manual buffering */
-    zend_string *contents = php_stream_copy_to_mem(stream, PHP_STREAM_COPY_ALL, 0);
-    if (contents) {
-        /* Update position to end of stream */
-        intern->position = php_stream_tell(stream);
-        RETURN_STR(contents);
+    /* Bounded read — see signalforge_http.max_body_size (audit H-H-4 / M-H-6) */
+    {
+        zend_long limit = SIGNALFORGE_HTTP_G(max_body_size);
+        size_t maxlen = (limit > 0) ? (size_t)limit : PHP_STREAM_COPY_ALL;
+        zend_string *contents = php_stream_copy_to_mem(stream, maxlen, 0);
+        if (contents) {
+            /* Update position to end of stream */
+            intern->position = php_stream_tell(stream);
+            RETURN_STR(contents);
+        }
     }
 
     /* Stream copy failed, try manual reading as fallback */
@@ -894,8 +898,10 @@ PHP_METHOD(Signalforge_Http_Stream, __toString)
         RETURN_EMPTY_STRING();
     }
 
-    /* Read all contents */
-    zend_string *contents = php_stream_copy_to_mem(stream, PHP_STREAM_COPY_ALL, 0);
+    /* Bounded read — see signalforge_http.max_body_size (audit H-H-4) */
+    zend_long limit = SIGNALFORGE_HTTP_G(max_body_size);
+    size_t maxlen = (limit > 0) ? (size_t)limit : PHP_STREAM_COPY_ALL;
+    zend_string *contents = php_stream_copy_to_mem(stream, maxlen, 0);
 
     /* Restore position (ignore errors per PSR-7) */
     php_stream_seek(stream, saved_position, SEEK_SET);

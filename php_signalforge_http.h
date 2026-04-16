@@ -59,6 +59,11 @@ extern zend_class_entry *signalforge_uri_ce;
 /* Maximum streamforge uploads to track for cleanup */
 #define SIGNALFORGE_MAX_STREAMFORGE_UPLOADS 64
 
+/* Default max body size when reading php://input or stream contents.
+ * Configurable at runtime via signalforge_http.max_body_size.
+ * Set to 0 to disable the limit (NOT recommended in production). */
+#define SIGNALFORGE_HTTP_DEFAULT_MAX_BODY_SIZE (16 * 1024 * 1024)  /* 16 MiB */
+
 ZEND_BEGIN_MODULE_GLOBALS(signalforge_http)
     /* Streamforge integration */
     bool streamforge_detected;     /* True if HTTP_X_STREAMFORGE=1 present */
@@ -67,6 +72,10 @@ ZEND_BEGIN_MODULE_GLOBALS(signalforge_http)
     /* Temp file paths that need cleanup on RSHUTDOWN if not moved */
     char *streamforge_temp_paths[SIGNALFORGE_MAX_STREAMFORGE_UPLOADS];
     bool streamforge_temp_moved[SIGNALFORGE_MAX_STREAMFORGE_UPLOADS];
+
+    /* Max body size in bytes for php_stream_copy_to_mem reads.
+     * Prevents memory exhaustion from huge request bodies. (audit H-H-4) */
+    zend_long max_body_size;
 ZEND_END_MODULE_GLOBALS(signalforge_http)
 
 ZEND_EXTERN_MODULE_GLOBALS(signalforge_http)
