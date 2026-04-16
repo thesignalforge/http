@@ -345,13 +345,21 @@ PHP_METHOD(Signalforge_Http_Stream, getContents)
         }
     }
 
-    /* Stream copy failed, try manual reading as fallback */
+    /* Stream copy failed, try manual reading as fallback.
+     * Enforce the same max_body_size limit as the primary path above
+     * to prevent unbounded memory growth. (audit H-H-stream-fallback) */
     smart_str buf = {0};
     char read_buf[65536]; /* Use larger buffer for better performance */
     ssize_t read_len;
+    zend_long fallback_limit = SIGNALFORGE_HTTP_G(max_body_size);
+    size_t total_read = 0;
 
     while ((read_len = php_stream_read(stream, read_buf, sizeof(read_buf))) > 0) {
         smart_str_appendl(&buf, read_buf, read_len);
+        total_read += (size_t)read_len;
+        if (fallback_limit > 0 && total_read >= (size_t)fallback_limit) {
+            break;
+        }
     }
 
     smart_str_0(&buf);

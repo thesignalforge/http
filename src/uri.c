@@ -232,6 +232,12 @@ int signalforge_parse_uri(const char *uri, size_t len, signalforge_uri_object *r
                 if (host_end < authority_end && *host_end == ':') {
                     port_start = host_end + 1;
                 }
+            } else {
+                /* Unclosed '[' — reject as invalid IPv6 rather than
+                 * silently storing "[::1" as the host. (audit H-H-ipv6) */
+                result->host = ZSTR_EMPTY_ALLOC();
+                result->port = SIGNALFORGE_PORT_UNSET;
+                host_start = host_end; /* skip host assignment below */
             }
         } else {
             /* Regular host - find last colon for port */
